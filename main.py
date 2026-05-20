@@ -5,7 +5,7 @@ from astrbot.api import logger
 import requests
 import json
 
-API_BASE_URL = "https://maimai.lxns.net/api/v0/chunithm"
+API_BASE_URL = "https://maimai.lxns.net/api/v0/user/chunithm"
 API_KEY = ""
 
 @register("helloworld", "YourName", "一个简单的 Hello World 插件", "1.0.0")
