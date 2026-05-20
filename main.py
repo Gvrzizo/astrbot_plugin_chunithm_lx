@@ -7,6 +7,11 @@ import requests
 import json
 import asyncio
 from pathlib import Path
+from jinja2 import Environment, FileSystemLoader
+from html2image import Html2Image
+import os
+
+from test import render_aj30_image
 
 @register("chunithm_lx", "Lauretta", "中二节奏机器人", "0.1.1")
 class Lauretta(Star):
@@ -25,6 +30,10 @@ class Lauretta(Star):
         dataPath = Path(get_astrbot_data_path())
         self.storagePath = dataPath / "plugin_data" / "astrbot_plugin_chunithm_lx"
         self.storagePath.mkdir(parents=True, exist_ok=True)
+        self.jacketPath = self.storagePath / "jacket"
+        self.jacketPath.mkdir(parents=True, exist_ok=True)
+        self.bestPath = self.bestPath / "best"
+        self.bestPath.mkdir(parents=True, exist_ok=True)
         self.songCacheFile = self.storagePath / "songs.json"
 
         self.diffiMap = {
@@ -34,6 +43,12 @@ class Lauretta(Star):
             3: "MASTER",
             4: "ULTIMA",
             5: "WORLD\'S END",
+        }
+        self.rankMap = {
+            "SSSP": "SSS+",
+            "SSS": "SSS",
+            "SSP": "SS+",
+            "SS": "SS",
         }
 
         self.songList = []
@@ -110,6 +125,22 @@ class Lauretta(Star):
         else:
             return high
 
+    def render_aj30_image(self, player_name: str, top30: list, aj30_avg: float, out_path: str, sender_id: str):
+        base_dir = os.path.dirname(self.storagePath)
+        env = Environment(loader=FileSystemLoader(base_dir), autoescape=True)
+        template = env.get_template("AJ30.html")
+
+        html = template.render(
+            player_name = player_name,
+            records = top30,
+            aj30_avg = aj30_avg,
+        )
+        hti = Html2Image(output_path = out_path, size = (1500, 1000), custom_flags=['--force-device-scale-factor=4'])
+        hti.screenshot(
+            html_str=html,
+            save_as=f"{sender_id}_AJ30.png",
+        )
+
     @filter.command("caj30")
     async def caj30(self, event: AstrMessageEvent):
         """查询自己的 AJ30"""
@@ -139,6 +170,7 @@ class Lauretta(Star):
                     "level": self.diffiMap[item.get("level_index", 0)] + " " + item.get("level", "?"),
                     "cc": self.songMap[item.get("id", 0)].get("difficulties", [])[item.get("level_index", 0)].get("level_value", 0),
                     "score": item.get("score", 0),
+                    "rank": self.rankMap[item.get("rank", "SSSP")],
                     "justiceCount": self.calcJusticeNumber(item.get("id", 0), item.get("level_index", 0), item.get("score", 0)),
                     "rating": item.get("rating", 0),
                 })
@@ -149,6 +181,15 @@ class Lauretta(Star):
 
         ajRecords.sort(key=lambda x: x["rating"], reverse=True)
         top30 = ajRecords[:30]
+
+        try:
+            response = await asyncio.to_thread(requests.get, self.playerInfoUrl, headers=headers)
+            response.raise_for_status()
+            playerdata = response.json().get("data", {})
+        except Exception as e:
+            yield event.plain_result(f"❌ 获取玩家信息失败: {e}")
+            return
+    # def render_aj30_image(self, player_name: str, top30: list, aj30_avg: float, out_path: str):
 
         msgLines = [f" 你最好的 {len(top30)} 条 AJ 成绩:"]
         totRat = 0
@@ -162,6 +203,9 @@ class Lauretta(Star):
             justiceCount = record["justiceCount"]
             msgLines.append(f"{idx}. {song} [{level} ({cc})] {score} {justiceCount}小AJ Rating: {rating:.2f}")
         msgLines.append(f" 你的AJ30为 {(totRat / 30):.2f} ")
+
+        render_aj30_image(playerdata.get("name", "CHUNITHM"), top30, totRat / 30, self.bestPath, event.get_sender_id())
+        yield event.image_result(self.bestPath + "/" + f"{event.get_sender_id()}_AJ30.png")
 
         yield event.plain_result("\n".join(msgLines))
 
