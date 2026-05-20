@@ -24,6 +24,7 @@ class Lauretta(Star):
 
         self.songListUrl = "https://maimai.lxns.net/api/v0/chunithm/song/list"
         self.aliasListUrl = "https://maimai.lxns.net/api/v0/chunithm/alias/list"
+        self.jacketAssetBaseUrl = "https://assets2.lxns.net/chunithm/jacket"
 
         dataPath = Path(get_astrbot_data_path())
         self.storagePath = dataPath / "plugin_data" / "astrbot_plugin_chunithm_lx"
@@ -123,10 +124,43 @@ class Lauretta(Star):
         else:
             return high
 
+    def _download_jacket(self, song_id: int):
+        """下载单张曲绘"""
+        target_file = self.jacketPath / f"{song_id}.png"
+        if target_file.exists():
+            return str(target_file.absolute())
+
+        url = f"{self.jacketAssetBaseUrl}/{song_id}.png"
+        try:
+            res = requests.get(url, timeout=10)
+            if res.status_code == 200:
+                with open(target_file, "wb") as f:
+                    f.write(res.content)
+                return str(target_file.absolute())
+            else:
+                logger.warning(f"曲绘下载失败，曲目 ID: {song_id}, 状态码: {res.status_code}")
+        except Exception as e:
+            logger.error(f"下载曲绘网络出错 (ID: {song_id}): {e}")
+        return ""
+
+    async def _ensure_jackets(self, top30_records: list):
+        """并发检查并下载所需曲绘"""
+        tasks = []
+        for rec in top30_records:
+            song_id = rec["song_id"]
+            tasks.append(asyncio.to_thread(self._download_jacket, song_id))
+
+        paths = await asyncio.gather(*tasks)
+        for rec, path in zip(top30_records, paths):
+            if path:
+                rec["jacket_url"] = f"file://{path}"
+            else:
+                rec["jacket_url"] = ""
+
     def render_aj30_image(self, player_name: str, top30: list, aj30_avg: float, out_path: str, sender_id: str):
         base_dir = self.storagePath
         env = Environment(loader=FileSystemLoader(base_dir), autoescape=True)
-        template = env.get_template("AJ30.html")
+        template = env.get_template("AJ30_1.html")
 
         html = template.render(
             player_name = player_name,
@@ -180,6 +214,8 @@ class Lauretta(Star):
         ajRecords.sort(key=lambda x: x["rating"], reverse=True)
         top30 = ajRecords[:30]
 
+        await self._ensure_jackets(top30)
+
         try:
             response = await asyncio.to_thread(requests.get, self.playerInfoUrl, headers=headers)
             response.raise_for_status()
@@ -187,7 +223,6 @@ class Lauretta(Star):
         except Exception as e:
             yield event.plain_result(f"❌ 获取玩家信息失败: {e}")
             return
-    # def render_aj30_image(self, player_name: str, top30: list, aj30_avg: float, out_path: str):
 
         msgLines = [f" 你最好的 {len(top30)} 条 AJ 成绩:"]
         totRat = 0
@@ -203,8 +238,8 @@ class Lauretta(Star):
         msgLines.append(f" 你的AJ30为 {(totRat / 30):.2f} ")
 
         self.render_aj30_image(playerdata.get("name", "CHUNITHM"), top30, totRat / 30, str(self.bestPath), event.get_sender_id())
-        yield event.image_result(str(self.bestPath) + "/" + f"{event.get_sender_id()}_AJ30.png")
 
+        yield event.image_result(str(self.bestPath) + "/" + f"{event.get_sender_id()}_AJ30.png")
         yield event.plain_result("\n".join(msgLines))
 
     async def terminate(self):
