@@ -157,7 +157,7 @@ class Lauretta(Star):
             level = record["level"]
             cc = record["cc"]
             rating = record["rating"]
-            totRat += eval(rating)
+            totRat += rating
             score = record["score"]
             justiceCount = record["justiceCount"]
             msgLines.append(f"{idx}. {song} [{level} ({cc})] {score} {justiceCount}小AJ Rating: {rating:.2f}")
