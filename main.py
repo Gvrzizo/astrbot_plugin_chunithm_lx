@@ -198,8 +198,10 @@ class Lauretta(Star):
         for item in scoreList:
             if item.get("full_combo") == "alljustice":
                 ajRecords.append({
+                    "song_id": item.get("id", "0"),
                     "song_name": item.get("song_name", "未知曲目"),
                     "level": self.diffiMap[item.get("level_index", 0)] + " " + item.get("level", "?"),
+                    "level_index": item.get("level_index", 0),
                     "cc": self.songMap[item.get("id", 0)].get("difficulties", [])[item.get("level_index", 0)].get("level_value", 0),
                     "score": item.get("score", 0),
                     "rank": self.rankMap[item.get("rank", "sssp")],
