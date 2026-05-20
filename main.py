@@ -43,10 +43,10 @@ class Lauretta(Star):
             5: "WORLD\'S END",
         }
         self.rankMap = {
-            "SSSP": "SSS+",
-            "SSS": "SSS",
-            "SSP": "SS+",
-            "SS": "SS",
+            "sssp": "SSS+",
+            "sss": "SSS",
+            "ssp": "SS+",
+            "ss": "SS",
         }
 
         self.songList = []
@@ -168,7 +168,7 @@ class Lauretta(Star):
                     "level": self.diffiMap[item.get("level_index", 0)] + " " + item.get("level", "?"),
                     "cc": self.songMap[item.get("id", 0)].get("difficulties", [])[item.get("level_index", 0)].get("level_value", 0),
                     "score": item.get("score", 0),
-                    "rank": self.rankMap[item.get("rank", "SSSP")],
+                    "rank": self.rankMap[item.get("rank", "sssp")],
                     "justiceCount": self.calcJusticeNumber(item.get("id", 0), item.get("level_index", 0), item.get("score", 0)),
                     "rating": item.get("rating", 0),
                 })
