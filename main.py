@@ -57,18 +57,15 @@ class MyPlugin(Star):
     async def loadSongFromApi(self):
         """从 API 获取歌曲列表"""
         try:
-            response = await asyncio.to_thread(requests.get, self.songListUrl, params={"notes": "true"})
+            response = await asyncio.to_thread(requests.get, self.songListUrl)
             response.raise_for_status()
             data = response.json()
-            if data.get("success"):
-                songs = data.get("songs", [])
-                self.songList = songs
-                for i in self.songList:
-                    self.songMap[i.get("id", 0)] = i
-                self._saveSongCache(songs)
-                logger.info(f"从网络获取歌曲列表成功，共 {len(songs)} 首")
-            else:
-                logger.error(f"获取歌曲列表失败: {data.get('message')}")
+            songs = data.get("songs", [])
+            self.songList = songs
+            for i in self.songList:
+                self.songMap[i.get("id", 0)] = i
+            self._saveSongCache(songs)
+            logger.info(f"从网络获取歌曲列表成功，共 {len(songs)} 首")
         except Exception as e:
             logger.error(f"网络请求出错: {e}")
 
