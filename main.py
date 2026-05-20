@@ -40,7 +40,7 @@ class MyPlugin(Star):
 
             if data.get("success"):
                 # 请求成功，处理data字段中的数据
-                yield event.plain_result(f"API绑定为用户{data.data.name}") # 发送一条纯文本消息
+                yield event.plain_result(f"API绑定为用户{data.name}") # 发送一条纯文本消息
             else:
                 yield event.plain_result(f"API返回错误: {data.get('message')}")
         except requests.exceptions.RequestException as e:
