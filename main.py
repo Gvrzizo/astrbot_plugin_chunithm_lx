@@ -9,7 +9,7 @@ import asyncio
 from pathlib import Path
 
 @register("chunithm_lx", "Lauretta", "中二节奏机器人", "0.1.1")
-class MyPlugin(Star):
+class Lauretta(Star):
     def __init__(self, context: Context):
         super().__init__(context)
 
@@ -26,6 +26,15 @@ class MyPlugin(Star):
         self.storagePath = dataPath / "plugin_data" / "astrbot_plugin_chunithm_lx"
         self.storagePath.mkdir(parents=True, exist_ok=True)
         self.songCacheFile = self.storagePath / "songs.json"
+
+        self.diffiMap = {
+            0: "BASIC",
+            1: "ADVANCED",
+            2: "EXPERT",
+            3: "MASTER",
+            4: "ULTIMA",
+            5: "WORLD\'S END",
+        }
 
         self.songList = []
         self.songMap = {}
@@ -57,7 +66,7 @@ class MyPlugin(Star):
     async def loadSongFromApi(self):
         """从 API 获取歌曲列表"""
         try:
-            response = await asyncio.to_thread(requests.get, self.songListUrl)
+            response = await asyncio.to_thread(requests.get, self.songListUrl, params={"notes": "true"})
             response.raise_for_status()
             data = response.json()
             songs = data.get("songs", [])
@@ -91,6 +100,16 @@ class MyPlugin(Star):
         except Exception as e:
             yield event.plain_result(f"❌ 网络请求出错: {e}")
 
+    def calcJusticeNumber(self, songid:int, score: int):
+        notes = self.songMap[songid].get("notes", {}).get("total", 0)
+        esti = notes - (score - 1000000) * notes / 10000
+        low = int(esti)
+        high = low + 1
+        if int(1010000 / notes * (notes - low) + 1000000 / notes * low) == score:
+            return low
+        else:
+            return high
+
     @filter.command("caj30")
     async def caj30(self, event: AstrMessageEvent):
         """查询自己的 AJ30"""
@@ -117,11 +136,11 @@ class MyPlugin(Star):
             if item.get("full_combo") == "alljustice":
                 ajRecords.append({
                     "song_name": item.get("song_name", "未知曲目"),
-                    "level": item.get("level", "?"),
+                    "level": self.diffiMap[item.get("level_index", 0)] + " " + item.get("level", "?"),
                     "cc": self.songMap[item.get("id", 0)].get("difficulties", [])[item.get("level_index", 0)].get("level_value", 0),
                     "score": item.get("score", 0),
+                    "justiceCount": self.calcJusticeNumber(item.get("id", 0), item.get("score", 0)),
                     "rating": item.get("rating", 0),
-                    "rank": item.get("rank", "")
                 })
 
         if not ajRecords:
@@ -131,24 +150,20 @@ class MyPlugin(Star):
         ajRecords.sort(key=lambda x: x["rating"], reverse=True)
         top30 = ajRecords[:30]
 
-        msgLines = [f" 你的 AJ 成绩 Top {len(top30)}（按 Rating）:"]
+        msgLines = [f" 你最好的 {len(top30)} 条 AJ 成绩:"]
+        totRat = 0
         for idx, record in enumerate(top30, 1):
             song = record["song_name"]
             level = record["level"]
             cc = record["cc"]
             rating = record["rating"]
+            totRat += eval(rating)
             score = record["score"]
-            rank = record["rank"].upper()
-            msgLines.append(f"{idx}. {song} [{level}({cc})] {score} {rank} ★{rating:.2f}")
+            justiceCount = record["justiceCount"]
+            msgLines.append(f"{idx}. {song} [{level} ({cc})] {score} {justiceCount}小AJ Rating: {rating:.2f}")
+        msgLines.append(f" 你的AJ30为 {(totRat / 30):.2f} ")
 
         yield event.plain_result("\n".join(msgLines))
-
-    @filter.command("helloworld")
-    async def helloworld(self, event: AstrMessageEvent):
-        """测试指令"""
-        user_name = event.get_sender_name()
-        message_str = event.message_str
-        yield event.plain_result(f"Hello, {user_name}, 你发了 {message_str}!")
 
     async def terminate(self):
         """插件卸载时调用"""
