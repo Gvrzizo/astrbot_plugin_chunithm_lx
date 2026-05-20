@@ -30,7 +30,7 @@ class Lauretta(Star):
         self.storagePath.mkdir(parents=True, exist_ok=True)
         self.jacketPath = self.storagePath / "jacket"
         self.jacketPath.mkdir(parents=True, exist_ok=True)
-        self.bestPath = self.bestPath / "best"
+        self.bestPath = self.storagePath / "best"
         self.bestPath.mkdir(parents=True, exist_ok=True)
         self.songCacheFile = self.storagePath / "songs.json"
 
@@ -202,8 +202,8 @@ class Lauretta(Star):
             msgLines.append(f"{idx}. {song} [{level} ({cc})] {score} {justiceCount}小AJ Rating: {rating:.2f}")
         msgLines.append(f" 你的AJ30为 {(totRat / 30):.2f} ")
 
-        self.render_aj30_image(playerdata.get("name", "CHUNITHM"), top30, totRat / 30, self.bestPath, event.get_sender_id())
-        yield event.image_result(self.bestPath + "/" + f"{event.get_sender_id()}_AJ30.png")
+        self.render_aj30_image(playerdata.get("name", "CHUNITHM"), top30, totRat / 30, str(self.bestPath), event.get_sender_id())
+        yield event.image_result(str(self.bestPath) + "/" + f"{event.get_sender_id()}_AJ30.png")
 
         yield event.plain_result("\n".join(msgLines))
 
