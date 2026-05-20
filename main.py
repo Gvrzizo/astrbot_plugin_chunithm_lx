@@ -118,7 +118,7 @@ class MyPlugin(Star):
                 ajRecords.append({
                     "song_name": item.get("song_name", "未知曲目"),
                     "level": item.get("level", "?"),
-                    "cc": self.songMap[item.get("id", 0)].get("difficulties", [])[3].get("level_value", 0),
+                    "cc": self.songMap[item.get("id", 0)].get("difficulties", [])[item.get("level_index", 0)].get("level_value", 0),
                     "score": item.get("score", 0),
                     "rating": item.get("rating", 0),
                     "rank": item.get("rank", "")
