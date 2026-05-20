@@ -160,7 +160,7 @@ class Lauretta(Star):
     def render_aj30_image(self, player_name: str, top30: list, aj30_avg: float, out_path: str, sender_id: str):
         base_dir = self.storagePath
         env = Environment(loader=FileSystemLoader(base_dir), autoescape=True)
-        template = env.get_template("AJ30_1.html")
+        template = env.get_template("AJ30.html")
 
         html = template.render(
             player_name = player_name,
