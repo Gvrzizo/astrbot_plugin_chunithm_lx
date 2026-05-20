@@ -11,8 +11,6 @@ from jinja2 import Environment, FileSystemLoader
 from html2image import Html2Image
 import os
 
-from test import render_aj30_image
-
 @register("chunithm_lx", "Lauretta", "中二节奏机器人", "0.1.1")
 class Lauretta(Star):
     def __init__(self, context: Context):
@@ -204,7 +202,7 @@ class Lauretta(Star):
             msgLines.append(f"{idx}. {song} [{level} ({cc})] {score} {justiceCount}小AJ Rating: {rating:.2f}")
         msgLines.append(f" 你的AJ30为 {(totRat / 30):.2f} ")
 
-        render_aj30_image(playerdata.get("name", "CHUNITHM"), top30, totRat / 30, self.bestPath, event.get_sender_id())
+        self.render_aj30_image(playerdata.get("name", "CHUNITHM"), top30, totRat / 30, self.bestPath, event.get_sender_id())
         yield event.image_result(self.bestPath + "/" + f"{event.get_sender_id()}_AJ30.png")
 
         yield event.plain_result("\n".join(msgLines))
