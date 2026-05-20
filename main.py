@@ -100,8 +100,8 @@ class Lauretta(Star):
         except Exception as e:
             yield event.plain_result(f"❌ 网络请求出错: {e}")
 
-    def calcJusticeNumber(self, songid:int, score: int):
-        notes = self.songMap[songid].get("notes", {}).get("total", 0)
+    def calcJusticeNumber(self, songid: int, difficulty: int, score: int):
+        notes = self.songMap[songid].get("difficulties", [])[difficulty].get("notes", {}).get("total", 0)
         esti = notes - (score - 1000000) * notes / 10000
         low = int(esti)
         high = low + 1
@@ -139,7 +139,7 @@ class Lauretta(Star):
                     "level": self.diffiMap[item.get("level_index", 0)] + " " + item.get("level", "?"),
                     "cc": self.songMap[item.get("id", 0)].get("difficulties", [])[item.get("level_index", 0)].get("level_value", 0),
                     "score": item.get("score", 0),
-                    "justiceCount": self.calcJusticeNumber(item.get("id", 0), item.get("score", 0)),
+                    "justiceCount": self.calcJusticeNumber(item.get("id", 0), item.get("level_index", 0), item.get("score", 0)),
                     "rating": item.get("rating", 0),
                 })
 
