@@ -84,6 +84,8 @@ class Lauretta(Star):
                         diffi = k.get("difficulty", 0)
                         cc = str(round(float(oricc), 1))
                         self.ccMap[cc].append([isongid, diffi])
+                for i in self.ccMap.values():
+                    i.sort(key = lambda x: x[1])
                 logger.info(f"已从缓存加载 {len(self.songList)} 首歌曲")
             except Exception as e:
                 logger.error(f"加载歌曲缓存失败: {e}")
@@ -119,6 +121,8 @@ class Lauretta(Star):
                     cc = str(round(float(oricc), 1))
                     self.ccMap[cc].append([isongid, diffi])
             self._saveSongCache(songs)
+            for i in self.ccMap.values():
+                i.sort(key = lambda x: x[1])
             logger.info(f"从网络获取歌曲列表成功，共 {len(songs)} 首")
         except Exception as e:
             logger.error(f"网络请求出错: {e}")
@@ -308,16 +312,23 @@ class Lauretta(Star):
         if not tarccs:
             yield event.plain_result("❌ 请输入合法的定数或等级！")
             return
+
+        listcc = []
+
         msgLines = []
         for curcc in tarccs:
+            listcc.append({"cc": curcc, "songs": []})
             msgLines.append(f"定数为{curcc}的歌曲列表如下：")
-            for idx, i in enumerate(self.ccMap[curcc], 1):
+            idx = 1
+            for i in self.ccMap[curcc]:
                 songid = i[0]
                 songdiffi = i[1]
                 songinfo = self.songMap[songid]
                 songname = songinfo.get("title", "未知曲目")
+                listcc[-1]["songs"].append([songid, songdiffi])
                 msgLines.append(f"{idx}. {songname} [{self.diffiMap[songdiffi]}]")
-            msgLines.append("")
+                idx += 1
+            msgLines.append(" ")
 
         yield event.plain_result("\n".join(msgLines))
 
