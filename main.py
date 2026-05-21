@@ -279,16 +279,45 @@ class Lauretta(Star):
     @filter.command("csonglist")
     async def csonglist(self, event: AstrMessageEvent, usrcc: str):
         """定数查歌"""
-        if usrcc not in self.ccs:
-            yield event.plain_result("❌ 请输入合法的定数！")
+        usrcc = usrcc.strip()
+        tarccs = []
+        if usrcc in self.ccs:
+            tarccs.append(usrcc)
+        elif usrcc.endswith("+"):
+            baseStr = usrcc[:-1]
+            if baseStr.isdigit():
+                baseVal = int(baseStr)
+                if 7 <= baseVal <= 9:
+                    tarccs.append(f"{baseVal}.5")
+                elif 10 <= baseVal <= 14:
+                    for dec in range(5, 10):
+                        tarccs.append(f"{baseVal}.{dec}")
+                elif baseVal == 15:
+                    for dec in range(5, 7):
+                        tarccs.append(f"{baseVal}.{dec}")
+        elif usrcc.isdigit():
+            baseVal = int(usrcc)
+            if 1 <= baseVal <= 6:
+                tarccs.append(f"{baseVal}.0")
+            elif 7 <= baseVal <= 9:
+                tarccs.append(f"{baseVal}.0")
+                tarccs.append(f"{baseVal}.5")
+            elif 10 <= baseVal <= 15:
+                for dec in range(0, 5):
+                    tarccs.append(f"{baseVal}.{dec}")
+        if not tarccs:
+            yield event.plain_result("❌ 请输入合法的定数或等级！")
             return
-        msgLines = [f"定数为{usrcc}的歌曲列表如下："]
-        for idx, i in enumerate(self.ccMap[usrcc], 1):
-            songid = i[0]
-            songdiffi = i[1]
-            songinfo = self.songMap[songid]
-            songname = songinfo.get("title", "未知曲目")
-            msgLines.append(f"{idx}. {songname} [{self.diffiMap[songdiffi]}]")
+        msgLines = []
+        for curcc in tarccs:
+            msgLines.append(f"定数为{curcc}的歌曲列表如下：")
+            for idx, i in enumerate(self.ccMap[usrcc], 1):
+                songid = i[0]
+                songdiffi = i[1]
+                songinfo = self.songMap[songid]
+                songname = songinfo.get("title", "未知曲目")
+                msgLines.append(f"{idx}. {songname} [{self.diffiMap[songdiffi]}]")
+            msgLines.append("")
 
         yield event.plain_result("\n".join(msgLines))
 
