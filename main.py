@@ -242,7 +242,7 @@ class Lauretta(Star):
         self.render_aj30_image(playerdata.get("name", "CHUNITHM"), top30, totRat / 30, str(self.bestPath), event.get_sender_id())
 
         yield event.image_result(str(self.bestPath) + "/" + f"{event.get_sender_id()}_AJ30.png")
-        yield event.plain_result("\n".join(msgLines))
+        # yield event.plain_result("\n".join(msgLines))
 
     async def terminate(self):
         """插件卸载时调用"""
