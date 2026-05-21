@@ -311,7 +311,7 @@ class Lauretta(Star):
         msgLines = []
         for curcc in tarccs:
             msgLines.append(f"定数为{curcc}的歌曲列表如下：")
-            for idx, i in enumerate(self.ccMap[usrcc], 1):
+            for idx, i in enumerate(self.ccMap[curcc], 1):
                 songid = i[0]
                 songdiffi = i[1]
                 songinfo = self.songMap[songid]
