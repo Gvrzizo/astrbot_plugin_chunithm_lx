@@ -49,6 +49,19 @@ class Lauretta(Star):
             "ssp": "SS+",
             "ss": "SS",
         }
+        self.ccs = []
+        self.ccMap = {}
+        tmpi = 0
+        while tmpi <= 157:
+            curcc = str(round(tmpi / 10.0, 1))
+            self.ccMap[curcc] = []
+            self.ccs.append(curcc)
+            if tmpi <= 60:
+                tmpi += 10
+            elif tmpi <= 95:
+                tmpi += 5
+            else:
+                tmpi += 1
 
         self.songList = []
         self.songMap = {}
@@ -61,12 +74,21 @@ class Lauretta(Star):
                 with open(self.songCacheFile, 'r', encoding='utf-8') as f:
                     self.songList = json.load(f)
                 for i in self.songList:
-                    self.songMap[i.get("id", 0)] = i
+                    isongid = i.get("id", 0)
+                    self.songMap[isongid] = i
+                    differ = i.get("difficulty", [])
+                    if not differ:
+                        continue
+                    for k in differ:
+                        oricc = k.get("level_value", 0)
+                        diffi = k.get("difficulty", 0)
+                        cc = str(round(float(oricc), 1))
+                        self.ccMap[cc].append([isongid, diffi])
                 logger.info(f"已从缓存加载 {len(self.songList)} 首歌曲")
             except Exception as e:
                 logger.error(f"加载歌曲缓存失败: {e}")
                 self.songList = []
-                self.songMap = []
+                self.songMap = {}
 
     def _saveSongCache(self, songs):
         """保存歌曲列表到本地"""
@@ -86,7 +108,16 @@ class Lauretta(Star):
             songs = data.get("songs", [])
             self.songList = songs
             for i in self.songList:
-                self.songMap[i.get("id", 0)] = i
+                isongid = i.get("id", 0)
+                self.songMap[isongid] = i
+                differ = i.get("difficulty", [])
+                if not differ:
+                    continue
+                for k in differ:
+                    oricc = k.get("level_value", 0)
+                    diffi = k.get("difficulty", 0)
+                    cc = str(round(float(oricc), 1))
+                    self.ccMap[cc].append([isongid, diffi])
             self._saveSongCache(songs)
             logger.info(f"从网络获取歌曲列表成功，共 {len(songs)} 首")
         except Exception as e:
@@ -227,7 +258,7 @@ class Lauretta(Star):
             yield event.plain_result(f"❌ 获取玩家信息失败: {e}")
             return
 
-        msgLines = [f" 你最好的 {len(top30)} 条 AJ 成绩:"]
+        msgLines = [f"你最好的 {len(top30)} 条 AJ 成绩:"]
         totRat = 0
         for idx, record in enumerate(top30, 1):
             song = record["song_name"]
@@ -244,6 +275,22 @@ class Lauretta(Star):
 
         yield event.image_result(str(self.bestPath) + "/" + f"{event.get_sender_id()}_AJ30.png")
         # yield event.plain_result("\n".join(msgLines))
+
+    @filter.command("csonglist")
+    async def csonglist(self, event: AstrMessageEvent, usrcc: str):
+        """定数查歌"""
+        if usrcc not in self.ccs:
+            yield event.plain_result("❌ 请输入合法的定数！")
+            return
+        msgLines = [f"定数为{usrcc}的歌曲列表如下："]
+        for idx, i in enumerate(self.ccMap[usrcc], 1):
+            songid = i[0]
+            songdiffi = i[1]
+            songinfo = self.songMap[songid]
+            songname = songinfo.get("title", "未知曲目")
+            msgLines.append(f"{idx}. {songname} [{self.diffiMap[songdiffi]}]")
+
+        yield event.plain_result("\n".join(msgLines))
 
     async def terminate(self):
         """插件卸载时调用"""
