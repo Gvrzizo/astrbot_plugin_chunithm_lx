@@ -157,13 +157,14 @@ class Lauretta(Star):
             else:
                 rec["jacket_url"] = ""
 
-    def render_aj30_image(self, player_name: str, top30: list, aj30_avg: float, out_path: str, sender_id: str):
+    def render_aj30_image(self, player_name: str, player_rating: float, top30: list, aj30_avg: float, out_path: str, sender_id: str):
         base_dir = self.storagePath
         env = Environment(loader=FileSystemLoader(base_dir), autoescape=True)
         template = env.get_template("AJ30.html")
 
         html = template.render(
             player_name = player_name,
+            player_rating = player_rating,
             records = top30,
             aj30_avg = aj30_avg,
         )
@@ -239,7 +240,7 @@ class Lauretta(Star):
             msgLines.append(f"{idx}. {song} [{level} ({cc})] {score} {justiceCount}小AJ Rating: {rating:.2f}")
         msgLines.append(f" 你的AJ30为 {(totRat / 30):.2f} ")
 
-        self.render_aj30_image(playerdata.get("name", "CHUNITHM"), top30, totRat / 30, str(self.bestPath), event.get_sender_id())
+        self.render_aj30_image(playerdata.get("name", "CHUNITHM"), playerdata.get("rating", 0.00), top30, totRat / 30, str(self.bestPath), event.get_sender_id())
 
         yield event.image_result(str(self.bestPath) + "/" + f"{event.get_sender_id()}_AJ30.png")
         # yield event.plain_result("\n".join(msgLines))
