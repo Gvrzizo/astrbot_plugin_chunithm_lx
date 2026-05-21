@@ -76,7 +76,7 @@ class Lauretta(Star):
                 for i in self.songList:
                     isongid = i.get("id", 0)
                     self.songMap[isongid] = i
-                    differ = i.get("difficulty", [])
+                    differ = i.get("difficulties", [])
                     if not differ:
                         continue
                     for k in differ:
@@ -110,7 +110,7 @@ class Lauretta(Star):
             for i in self.songList:
                 isongid = i.get("id", 0)
                 self.songMap[isongid] = i
-                differ = i.get("difficulty", [])
+                differ = i.get("difficulties", [])
                 if not differ:
                     continue
                 for k in differ:
