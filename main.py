@@ -63,11 +63,14 @@ class Lauretta(Star):
             4: "ULTIMA",
             5: "WORLD\'S END",
         }
+        self.diffiInverted = {v: k for k, v in self.diffiMap.items()}
         self.rankMap = {
             "sssp": "SSS+",
             "sss": "SSS",
             "ssp": "SS+",
             "ss": "SS",
+            "sp": "S+",
+            "s": "S"
         }
         self.badgeStyleMap = {
             "alljustice": ("aj", "AJ"),
@@ -588,19 +591,45 @@ class Lauretta(Star):
                 progressive=True
             )
 
-    @filter.command("ccompletion")
-    async def ccompletion(self, event: AstrMessageEvent, usrcc: str):
+    @filter.command("ccomplete")
+    async def ccomplete(self, event: AstrMessageEvent, usrcc: str, usrdiff: str = "BASIC", only: str = "0", minrank: str = "NONE"):
         """查询某定数/等级的个人成绩完成表"""
         qqid = event.get_sender_id()
         usrcc = usrcc.strip()
+        minrank = minrank.strip().upper()
 
-        # 1. 验证 Token 状态
+        try:
+            only_val = int(only)
+            if only_val not in [0, 1]:
+                raise ValueError
+        except ValueError:
+            yield event.plain_result(
+                "❌ only参数只能为0（默认）或者1！\n"
+                "值为0时会显示你输入难度差分及以上（对于EXPERT来说，会显示EXPERT MASTER ULTIMA的谱面）。\n"
+                "值为1的时候只会显示对应难度差分的谱面。"
+            )
+            return
+
+        if not usrdiff.isalpha():
+            yield event.plain_result("❌ 请输入合法的难度！\n示例：\n/ccomplete 14+ MASTER\n/ccomplete 13.2 expert")
+            return
+
+        usrdiff = usrdiff.upper()
+        if usrdiff not in self.diffiInverted.keys():
+            yield event.plain_result("❌ 请输入合法的难度！\n示例：\n/ccomplete 14+ MASTER 0\n/ccomplete 13.2 expert 1")
+            return
+
+        minDiffi = self.diffiInverted[usrdiff]
+        if only_val:
+            diffiList = [minDiffi]
+        else:
+            diffiList = [i for i in range(minDiffi, 6)]
+
         access_token = await self.tm.get_valid_token(qqid)
         if not access_token:
             yield event.plain_result("❌ 你还未绑定或授权已过期，请使用 /bind 重新绑定。")
             return
 
-        # 2. 解析定数范围（复用你原有的解析逻辑）
         tarccs = []
         if usrcc in self.ccs:
             tarccs.append(usrcc)
@@ -628,10 +657,9 @@ class Lauretta(Star):
                     tarccs.append(f"{baseVal}.{dec}")
 
         if not tarccs:
-            yield event.plain_result("❌ 请输入合法的定数或等级！\n示例：\n/ccompletion 14+\n/ccompletion 13.2")
+            yield event.plain_result("❌ 请输入合法的定数或等级！\n示例：\n/ccomplete 14+\n/ccomplete 13.2")
             return
 
-        # 3. 异步请求用户的全部成绩
         headers = {"Authorization": f"Bearer {access_token}"}
         try:
             response = await asyncio.to_thread(requests.get, self.scoresUrl, headers=headers)
@@ -645,7 +673,6 @@ class Lauretta(Star):
             yield event.plain_result(f"❌ API返回错误: {scoredata.get('message')}")
             return
 
-        # 4. 建立用户成绩的快速索引 Map：键名为 "songId_levelIndex"
         user_scores_map = {}
         for item in scoredata.get("data", []):
             sid = item.get("id")
@@ -653,7 +680,6 @@ class Lauretta(Star):
             if sid is not None and l_idx is not None:
                 user_scores_map[f"{sid}_{l_idx}"] = item
 
-        # 5. 获取玩家个人信息以在标题展示（可选）
         try:
             p_res = await asyncio.to_thread(requests.get, self.playerInfoUrl, headers=headers)
             p_res.raise_for_status()
@@ -661,38 +687,70 @@ class Lauretta(Star):
         except Exception:
             player_name = "CHUNITHM"
 
-        # 6. 构建与合并数据结构
+        rank_order = {"D": 1, "C": 2, "B": 3, "BB": 4, "BBB": 5, "A": 6, "AA": 7, "AAA": 8,
+                      "S": 9, "SP": 10, "SS": 11, "SSP": 12, "SSS": 13, "SSSP": 14}
+
+        target_rank = minrank.replace("+", "P")
+        target_rank = target_rank.upper()
+        if target_rank not in rank_order and target_rank not in ["FC", "AJ"]:
+            yield event.plain_result(
+                "❌ 请输入合法的完成情况！\n"
+                "示例：SSS、SSS+、AJ......"
+            )
+            return
+        is_conditional = target_rank in rank_order or target_rank in ["FC", "AJ"]
+
         cc_blocks = []
         for curcc in tarccs:
             songs_data = []
             for songid, diffi in self.ccMap.get(curcc, []):
+                if diffi not in diffiList:
+                    continue
+
                 songinfo = self.songMap.get(songid)
                 if not songinfo:
                     continue
 
                 jacket_path = self._download_jacket(songid)
-
-                # 核心连接点：检查用户是否玩过这首歌的这个难度
                 lookup_key = f"{songid}_{diffi}"
                 played_info = user_scores_map.get(lookup_key)
 
                 is_played = False
+                show_check = False
                 rank_str = ""
                 rank_class = "OTHER"
                 badge_type = ""
                 badge_name = ""
 
                 if played_info:
-                    is_played = True
-                    # 转换 Rank 展现形式 (如 sss -> SSS, sssp -> SSS+)
-                    raw_rank = played_info.get("rank", "other")
-                    rank_str = self.rankMap.get(raw_rank, raw_rank.upper())
-                    rank_class = raw_rank.upper()  # 传给前端用于做样式定制
+                    raw_rank = played_info.get("rank", "other").upper().replace("+", "P")
+                    fc_aj_status = played_info.get("full_combo", "").upper().replace("+", "P")
 
-                    # 转换 FC/AJ 状态
-                    fc_aj_status = played_info.get("full_combo", "")
-                    if fc_aj_status in self.badgeStyleMap:
-                        badge_type, badge_name = self.badgeStyleMap[fc_aj_status]
+                    satisfy = False
+                    if not is_conditional:
+                        satisfy = True
+                    else:
+                        if target_rank in rank_order:
+                            if raw_rank in rank_order and rank_order[raw_rank] >= rank_order[target_rank]:
+                                satisfy = True
+                        elif target_rank in ["FC", "AJ"]:
+                            badge_ranks = {"FC": 1, "AJ": 2}
+
+                            if fc_aj_status in badge_ranks and badge_ranks[fc_aj_status] >= badge_ranks[target_rank]:
+                                satisfy = True
+
+                    if satisfy:
+                        is_played = True
+                        if is_conditional:
+                            show_check = True
+                        else:
+                            raw_rank_lower = played_info.get("rank", "other")
+                            rank_str = self.rankMap.get(raw_rank_lower, raw_rank_lower.upper())
+                            rank_class = raw_rank_lower.upper()
+
+                            raw_fc = played_info.get("full_combo", "")
+                            if raw_fc in self.badgeStyleMap:
+                                badge_type, badge_name = self.badgeStyleMap[raw_fc]
 
                 songs_data.append({
                     "song_id": songid,
@@ -700,8 +758,8 @@ class Lauretta(Star):
                     "diff": diffi,
                     "diff_name": self.diffiMap.get(diffi, "UNK"),
                     "jacket_url": f"file://{jacket_path}" if jacket_path else "",
-                    # 个人成绩传递
                     "played": is_played,
+                    "show_check": show_check,
                     "rank": rank_str,
                     "rank_class": rank_class,
                     "badge_type": badge_type,
@@ -715,12 +773,12 @@ class Lauretta(Star):
                 })
 
         if not cc_blocks:
-            yield event.plain_result("⚠️ 未找到对应定数的歌曲")
+            yield event.plain_result("⚠️ 未找到对应条件的歌曲")
             return
 
-        query_title = f"{player_name} 的 {usrcc} 完成表"
+        cond_title = f" [{minrank}以上]" if is_conditional else ""
+        query_title = f"{player_name} 的 {usrcc} {'' if minrank == 'NONE' else minrank} 完成表 ({usrdiff}{'' if only_val else '及以上'}){cond_title}"
 
-        # 7. 投入线程池渲染并发送
         await asyncio.to_thread(
             self.render_completion_image,
             query_title,
@@ -737,6 +795,7 @@ class Lauretta(Star):
         msgLines.append("/bind -- 绑定落雪账号。请先不带参数直接输入/bind得到授权链接")
         msgLines.append("/caj30 -- 生成中二节奏AJ30")
         msgLines.append("/csonglist -- 根据定数/等级查歌")
+        msgLines.append("/ccomplete -- 定数/等级进度表")
 
         yield event.plain_result("\n".join(msgLines))
 
