@@ -152,45 +152,45 @@ class Lauretta(Star):
         if not self.songList:
             await self.loadSongFromApi()
 
-    async def exchange_code_1(self, qq_id: str, code: str) -> bool:
-        """用授权码换取 token 并存入数据库"""
-        try:
-            logger.info("POSTING")
-            resp = await asyncio.to_thread(
-                requests.post,
-                "https://maimai.lxns.net/api/v0/oauth/token",
-                json={
-                    "client_id": self.clientid,
-                    "client_secret": self.clientsecret,
-                    "grant_type": "authorization_code",
-                    "code": code,
-                    "redirect_uri": "urn:ietf:wg:oauth:2.0:oob"
-                },
-                timeout=10
-            )
-            logger.info("POSTING COMPLETE")
-
-            res_json = resp.json()
-            if resp.status_code != 200 or not res_json.get("success"):
-                return False
-            logger.info("GETTING TOKEN DATA")
-
-            token_data = res_json["data"]
-            access_token = token_data["access_token"]
-            refresh_token = token_data["refresh_token"]
-            expires_in = token_data["expires_in"]
-            now = int(time.time())
-            logger.info(f"{qq_id}\n{access_token}\n{refresh_token}\n{expires_in}")
-            with sqlite3.connect(self.db_path) as conn:
-                conn.execute(
-                    """INSERT OR REPLACE INTO user_tokens (qq_id, access_token, refresh_token, expires_at)
-                       VALUES (?, ?, ?, ?)""",
-                    (str(qq_id), access_token, refresh_token, now + expires_in)
-                )
-                conn.commit()
-                return True
-        except Exception:
-            return False
+    # async def exchange_code_1(self, qq_id: str, code: str) -> bool:
+    #     """用授权码换取 token 并存入数据库"""
+    #     try:
+    #         logger.info("POSTING")
+    #         resp = await asyncio.to_thread(
+    #             requests.post,
+    #             "https://maimai.lxns.net/api/v0/oauth/token",
+    #             json={
+    #                 "client_id": self.clientid,
+    #                 "client_secret": self.clientsecret,
+    #                 "grant_type": "authorization_code",
+    #                 "code": code,
+    #                 "redirect_uri": "urn:ietf:wg:oauth:2.0:oob"
+    #             },
+    #             timeout=10
+    #         )
+    #         logger.info("POSTING COMPLETE")
+    #
+    #         res_json = resp.json()
+    #         if resp.status_code != 200 or not res_json.get("success"):
+    #             return False
+    #         logger.info("GETTING TOKEN DATA")
+    #
+    #         token_data = res_json["data"]
+    #         access_token = token_data["access_token"]
+    #         refresh_token = token_data["refresh_token"]
+    #         expires_in = token_data["expires_in"]
+    #         now = int(time.time())
+    #         logger.info(f"{qq_id}\n{access_token}\n{refresh_token}\n{expires_in}")
+    #         with sqlite3.connect(self.db_path) as conn:
+    #             conn.execute(
+    #                 """INSERT OR REPLACE INTO user_tokens (qq_id, access_token, refresh_token, expires_at)
+    #                    VALUES (?, ?, ?, ?)""",
+    #                 (str(qq_id), access_token, refresh_token, now + expires_in)
+    #             )
+    #             conn.commit()
+    #             return True
+    #     except Exception:
+    #         return False
 
     @filter.command("bind")
     async def bind(self, event: AstrMessageEvent, code: str = ""):
@@ -217,15 +217,7 @@ class Lauretta(Star):
             )
             return
 
-        # success = await asyncio.to_thread(
-        #     self.tm.exchange_code, qqid, code.strip()
-        # )
-
-        # success = await asyncio.to_thread(
-        #     self.exchange_code_1, qqid, code.strip()
-        # )
-
-        success = await self.exchange_code_1(qqid, code.strip())
+        success = await self.tm.exchange_code(qqid, code.strip())
 
         if not success:
             yield event.plain_result("❌ 绑定失败，请检查授权码是否正确或是否过期。")
@@ -319,7 +311,7 @@ class Lauretta(Star):
         #     yield event.plain_result("❌ 请先使用 /bind 绑定你的 API Token")
         #     return
 
-        access_token = await asyncio.to_thread(self.tm.get_valid_token, qqid)
+        access_token = await self.tm.get_valid_token(qqid)
 
         if not access_token:
             yield event.plain_result(
@@ -387,7 +379,16 @@ class Lauretta(Star):
             msgLines.append(f"{idx}. {song} [{level} ({cc})] {score} {justiceCount}小AJ Rating: {rating:.2f}")
         msgLines.append(f" 你的AJ30为 {(totRat / 30):.2f} ")
 
-        self.render_aj30_image(playerdata.get("name", "CHUNITHM"), playerdata.get("rating", 0.00), top30, totRat / 30, str(self.bestPath), event.get_sender_id())
+        # self.render_aj30_image(playerdata.get("name", "CHUNITHM"), playerdata.get("rating", 0.00), top30, totRat / 30, str(self.bestPath), event.get_sender_id())
+        await asyncio.to_thread(
+            self.render_aj30_image,
+            playerdata.get("name", "CHUNITHM"),
+            playerdata.get("rating", 0.00),
+            top30,
+            totRat / 30,
+            str(self.bestPath),
+            event.get_sender_id()
+        )
 
         yield event.image_result(str(self.bestPath) + "/" + f"{event.get_sender_id()}_AJ30.png")
         # yield event.plain_result("\n".join(msgLines))
