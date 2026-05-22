@@ -43,6 +43,9 @@ class Lauretta(Star):
         self.clientid = self.oauthidFile.read_text(encoding = "utf-8").strip()
         self.clientsecret = self.oauthsecretFile.read_text(encoding = "utf-8").strip()
 
+        if self.clientid and self.clientsecret:
+            logger.info("oauth info loaded")
+
         self.tm = TokenManager(
             db_path = str(self.storagePath / "tokens.db"),
             client_id = self.clientid,
