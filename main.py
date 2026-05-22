@@ -376,7 +376,7 @@ class Lauretta(Star):
 
         base_dir = self.storagePath
         env = Environment(loader=FileSystemLoader(base_dir), autoescape=True)
-        template = env.get_template("CCQuery.html")
+        template = env.get_template("CSONGLIST.html")
 
         html = template.render(
             query_title=query_title,
