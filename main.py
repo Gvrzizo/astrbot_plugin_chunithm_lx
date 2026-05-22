@@ -385,10 +385,10 @@ class Lauretta(Star):
         )
 
         width = 1600
-        songs_per_row = 5
+        songs_per_row = 10
         max_songs = max((len(b["songs"]) for b in cc_blocks), default=0)
         rows = (max_songs + songs_per_row - 1) // songs_per_row if max_songs else 1
-        height = 150 + len(cc_blocks) * (100 + rows * 130)  # 减小高度系数
+        height = 150 + len(cc_blocks) * (120 + rows * 166)  # 减小高度系数
         height = min(max(height, 700), 4000)
 
         # 优化2：降低scale factor
@@ -401,6 +401,7 @@ class Lauretta(Star):
         hti.screenshot(
             html_str=html,
             save_as=tmp_file,
+            custom_flags=['--force-device-scale-factor=2']
         )
 
         tmp_path = Path(out_path) / tmp_file
