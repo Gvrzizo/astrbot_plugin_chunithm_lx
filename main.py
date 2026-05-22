@@ -394,14 +394,14 @@ class Lauretta(Star):
         # 优化2：降低scale factor
         hti = Html2Image(
             output_path=out_path,
-            size=(width, height)
+            size=(width, height),
+            custom_flags=['--force-device-scale-factor=2']
         )
 
         tmp_file = f"{sender_id}_CCQuery_tmp.png"
         hti.screenshot(
             html_str=html,
-            save_as=tmp_file,
-            custom_flags=['--force-device-scale-factor=2']
+            save_as=tmp_file
         )
 
         tmp_path = Path(out_path) / tmp_file
