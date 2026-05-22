@@ -153,6 +153,21 @@ class Lauretta(Star):
     async def bind(self, event: AstrMessageEvent, code: str = ""):
         """OAuth绑定"""
         qqid = event.get_sender_id()
+        testbind = await self.tm.get_valid_token(qqid)
+        if testbind:
+            try:
+                headers = {"Authorization": f"Bearer {testbind}"}
+                response = await asyncio.to_thread(requests.get, self.playerInfoUrl, headers=headers)
+                response.raise_for_status()
+                usrdata = response.json()
+                name = usrdata.get("data", {}).get("name", "未知用户")
+                yield event.plain_result(
+                    f"已经绑定为用户{name}了哦"
+                )
+                return
+            except Exception as e:
+                yield event.plain_result(f"❌ 网络请求出错: {e}")
+                return
         if not code:
             # 无参数：返回授权链接
             yield event.plain_result(
