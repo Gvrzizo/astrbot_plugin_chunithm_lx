@@ -9,7 +9,7 @@ import asyncio
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 from html2image import Html2Image
-from TokenManager import TokenManager
+from .TokenManager import TokenManager
 import os
 
 @register("chunithm_lx", "Lauretta", "中二节奏机器人", "0.1.1")
