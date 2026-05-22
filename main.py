@@ -34,6 +34,8 @@ class Lauretta(Star):
         self.jacketPath.mkdir(parents=True, exist_ok=True)
         self.bestPath = self.storagePath / "best"
         self.bestPath.mkdir(parents=True, exist_ok=True)
+        self.ccPath = self.storagePath / "cc"
+        self.ccPath.mkdir(parents=True, exist_ok=True)
         self.oauthPath = self.storagePath / "oauth"
         self.db_path = str(self.storagePath / "tokens.db")
         self.oauthidFile = self.oauthPath / "clientid"
@@ -345,6 +347,29 @@ class Lauretta(Star):
 
         yield event.image_result(str(self.bestPath) + "/" + f"{event.get_sender_id()}_AJ30.png")
 
+    def render_cc_query_image(self, query_title: str, cc_blocks: list, out_path: str, sender_id: str):
+        """渲染定数查歌结果图片"""
+        base_dir = self.storagePath
+        env = Environment(loader=FileSystemLoader(base_dir), autoescape=True)
+        template = env.get_template("CSONGLIST.html")
+
+        html = template.render(
+            query_title=query_title,
+            cc_blocks=cc_blocks,
+            total_songs=sum(len(b["songs"]) for b in cc_blocks)
+        )
+
+        songs_per_row = 5
+        rows_per_block = max((len(b["songs"]) + songs_per_row - 1) // songs_per_row for b in cc_blocks) if cc_blocks else 1
+        height = 200 + len(cc_blocks) * (120 + rows_per_block * 166)  # 头部+每块(标签区+歌曲区)
+        height = min(max(height, 900), 4000)  # 限制高度范围
+
+        hti = Html2Image(output_path=out_path, size=(1600, height), custom_flags=['--force-device-scale-factor=3'])
+        hti.screenshot(
+            html_str=html,
+            save_as=f"{sender_id}_CCQuery.png",
+        )
+
     @filter.command("csonglist")
     async def csonglist(self, event: AstrMessageEvent, usrcc: str):
         """定数查歌"""
@@ -375,32 +400,70 @@ class Lauretta(Star):
                 for dec in range(0, 5):
                     tarccs.append(f"{baseVal}.{dec}")
         if not tarccs:
-            yield event.plain_result("❌ 请输入合法的定数或等级！")
+            yield event.plain_result("❌ 请输入合法的定数或等级！\n示例：\n/csonglist 14+\n/csonglist 15.3")
             return
 
-        listcc = []
-
-        msgLines = []
+        cc_blocks = []
         for curcc in tarccs:
-            listcc.append({"cc": curcc, "songs": []})
-            msgLines.append(f"定数为{curcc}的歌曲列表如下：")
-            idx = 1
-            for i in self.ccMap[curcc]:
-                songid = i[0]
-                songdiffi = i[1]
-                songinfo = self.songMap[songid]
-                songname = songinfo.get("title", "未知曲目")
-                listcc[-1]["songs"].append([songid, songdiffi])
-                msgLines.append(f"{idx}. {songname} [{self.diffiMap[songdiffi]}]")
-                idx += 1
-            msgLines.append(" ")
+            songs_data = []
+            for songid, diffi in self.ccMap.get(curcc, []):
+                songinfo = self.songMap.get(songid)
+                if not songinfo:
+                    continue
+                jacket_path = self._download_jacket(songid)
+                songs_data.append({
+                    "song_id": songid,
+                    "song_name": songinfo.get("title", "未知曲目"),
+                    "diff": diffi,
+                    "diff_name": self.diffiMap.get(diffi, "UNK"),
+                    "jacket_url": f"file://{jacket_path}" if jacket_path else ""
+                })
+            if songs_data:
+                cc_blocks.append({
+                    "cc": curcc,
+                    "songs": songs_data
+                })
 
-        yield event.plain_result("\n".join(msgLines))
+        if not cc_blocks:
+            yield event.plain_result("⚠️ 未找到对应定数的歌曲")
+            return
+
+        query_title = f"定数查歌: {', '.join(b['cc'] for b in cc_blocks)}"
+
+        await asyncio.to_thread(
+            self.render_cc_query_image,
+            query_title,
+            cc_blocks,
+            str(self.ccPath),  # 输出目录
+            event.get_sender_id()
+        )
+
+        # total = sum(len(b["songs"]) for b in cc_blocks)
+        yield event.image_result(f"{self.ccPath}/{event.get_sender_id()}_CCQuery.png")
+
+        # listcc = []
+        #
+        # msgLines = []
+        # for curcc in tarccs:
+        #     listcc.append({"cc": curcc, "songs": []})
+        #     msgLines.append(f"定数为{curcc}的歌曲列表如下：")
+        #     idx = 1
+        #     for i in self.ccMap[curcc]:
+        #         songid = i[0]
+        #         songdiffi = i[1]
+        #         songinfo = self.songMap[songid]
+        #         songname = songinfo.get("title", "未知曲目")
+        #         listcc[-1]["songs"].append([songid, songdiffi])
+        #         msgLines.append(f"{idx}. {songname} [{self.diffiMap[songdiffi]}]")
+        #         idx += 1
+        #     msgLines.append(" ")
+        #
+        # yield event.plain_result("\n".join(msgLines))
 
     @filter.command("help")
     async def help(self, event: AstrMessageEvent):
         msgLines = ["可用的指令："]
-        msgLines.append("/bind -- 绑定落雪账号")
+        msgLines.append("/bind -- 绑定落雪账号。请先不带参数直接输入/bind得到授权链接")
         msgLines.append("/caj30 -- 生成中二节奏AJ30")
 
         yield event.plain_result("\n".join(msgLines))
