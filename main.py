@@ -9,6 +9,7 @@ import asyncio
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 from html2image import Html2Image
+from TokenManager import TokenManager
 import os
 
 @register("chunithm_lx", "Lauretta", "中二节奏机器人", "0.1.1")
@@ -25,6 +26,7 @@ class Lauretta(Star):
         self.songListUrl = "https://maimai.lxns.net/api/v0/chunithm/song/list"
         self.aliasListUrl = "https://maimai.lxns.net/api/v0/chunithm/alias/list"
         self.jacketAssetBaseUrl = "https://assets2.lxns.net/chunithm/jacket"
+        self.oauthUrl = "https://maimai.lxns.net/oauth/authorize?response_type=code&client_id=8e412bac-aeab-460c-9556-22a17fd31c49&redirect_uri=urn%3Aietf%3Awg%3Aoauth%3A2.0%3Aoob&scope=read_user_profile+read_player"
 
         dataPath = Path(get_astrbot_data_path())
         self.storagePath = dataPath / "plugin_data" / "astrbot_plugin_chunithm_lx"
@@ -40,6 +42,12 @@ class Lauretta(Star):
 
         self.clientid = self.oauthidFile.read_text(encoding = "utf-8").strip()
         self.clientsecret = self.oauthsecretFile.read_text(encoding = "utf-8").strip()
+
+        self.tm = TokenManager(
+            db_path = str(self.storagePath / "tokens.db"),
+            client_id = self.clientid,
+            client_secret = self.clientsecret
+        )
 
         self.diffiMap = {
             0: "BASIC",
@@ -139,19 +147,54 @@ class Lauretta(Star):
             await self.loadSongFromApi()
 
     @filter.command("bind")
-    async def bind(self, event: AstrMessageEvent, usrapi: str):
-        """绑定个人API Token，格式：/bind <token>"""
-        self.apiKey = usrapi
-        headers = {"X-User-Token": self.apiKey}
+    async def bind(self, event: AstrMessageEvent, code: str = ""):
+        """OAuth绑定"""
+        # self.apiKey = usrapi
+        # headers = {"X-User-Token": self.apiKey}
+        # try:
+        #     response = await asyncio.to_thread(requests.get, self.playerInfoUrl, headers=headers)
+        #     response.raise_for_status()
+        #     usrdata = response.json()
+        #     if usrdata.get("success"):
+        #         name = usrdata.get("data", {}).get("name", "未知用户")
+        #         yield event.plain_result(f"✅ API绑定成功，用户：{name}")
+        #     else:
+        #         yield event.plain_result(f"❌ API返回错误: {usrdata.get('message')}")
+        # except Exception as e:
+        #     yield event.plain_result(f"❌ 网络请求出错: {e}")
+        qqid = event.get_sender_id()
+        if not code:
+            # 无参数：返回授权链接
+            yield event.plain_result(
+                f"🔗 请点击以下链接授权：\n{self.oauthUrl}\n\n"
+                f"授权完成后会得到一个授权码，之后使用 /bind <授权码> 完成绑定。"
+            )
+            return
+
+        success = await asyncio.to_thread(
+            self.tm.exchange_code, qqid, code.strip()
+        )
+
+        if not success:
+            yield event.plain_result("❌ 绑定失败，请检查授权码是否正确或是否过期。")
+            return
+
+        # 验证 token 有效性并获取玩家名
+        access_token = self.tm.get_valid_token(qqid)
+        if not access_token:
+            yield event.plain_result("❌ 绑定失败，无法获取有效令牌。")
+            return
+
+        headers = {"Authorization": f"Bearer {access_token}"}
         try:
             response = await asyncio.to_thread(requests.get, self.playerInfoUrl, headers=headers)
             response.raise_for_status()
             usrdata = response.json()
             if usrdata.get("success"):
                 name = usrdata.get("data", {}).get("name", "未知用户")
-                yield event.plain_result(f"✅ API绑定成功，用户：{name}")
+                yield event.plain_result(f"✅ 绑定成功，用户：{name}")
             else:
-                yield event.plain_result(f"❌ API返回错误: {usrdata.get('message')}")
+                yield event.plain_result(f"❌ API 返回错误: {usrdata.get('message')}")
         except Exception as e:
             yield event.plain_result(f"❌ 网络请求出错: {e}")
 
@@ -218,11 +261,22 @@ class Lauretta(Star):
     @filter.command("caj30")
     async def caj30(self, event: AstrMessageEvent):
         """查询自己的 AJ30"""
-        if not self.apiKey:
-            yield event.plain_result("❌ 请先使用 /bind 绑定你的 API Token")
+        qqid = event.get_sender_id()
+
+        # if not self.apiKey:
+        #     yield event.plain_result("❌ 请先使用 /bind 绑定你的 API Token")
+        #     return
+
+        access_token = await asyncio.to_thread(self.tm.get_valid_token, qqid)
+
+        if not access_token:
+            yield event.plain_result(
+                "❌ 你还未绑定或授权已过期，请使用 /bind 重新绑定。"
+            )
             return
 
-        headers = {"X-User-Token": self.apiKey}
+        # headers = {"X-User-Token": self.apiKey}
+        headers = {"Authorization": f"Bearer {access_token}"}
         try:
             response = await asyncio.to_thread(requests.get, self.scoresUrl, headers=headers)
             response.raise_for_status()
