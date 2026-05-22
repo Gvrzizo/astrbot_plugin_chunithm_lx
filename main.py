@@ -180,7 +180,7 @@ class Lauretta(Star):
             return
 
         # 验证 token 有效性并获取玩家名
-        access_token = self.tm.get_valid_token(qqid)
+        access_token = await self.tm.get_valid_token(qqid)
         if not access_token:
             yield event.plain_result("❌ 绑定失败，无法获取有效令牌。")
             return
