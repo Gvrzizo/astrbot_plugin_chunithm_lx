@@ -386,12 +386,12 @@ class Lauretta(Star):
 
         width = 1600
         songs_per_row = 10
-        max_songs = max((len(b["songs"]) for b in cc_blocks), default=0)
-        rows = (max_songs + songs_per_row - 1) // songs_per_row if max_songs else 1
-        height = 150 + len(cc_blocks) * (120 + rows * 166)  # 减小高度系数
-        height = min(max(height, 700), 4000)
+        rows = 0
+        for b in cc_blocks:
+            songnum = len(b["songs"])
+            rows += (songnum + songs_per_row - 1) // songs_per_row
+        height = 150 + rows * 170 + len(cc_blocks) * 30
 
-        # 优化2：降低scale factor
         hti = Html2Image(
             output_path=out_path,
             size=(width, height),
@@ -414,19 +414,16 @@ class Lauretta(Star):
         img.save(
             final_path,
             format='JPEG',
-            quality=85,  # 质量85%，平衡清晰度和体积
+            quality=85,
             optimize=True,
             progressive=True
         )
 
-        # 删除临时文件
         tmp_path.unlink(missing_ok=True)
 
-        # 检查文件大小
         file_size = final_path.stat().st_size / 1024 / 1024  # MB
-        if file_size > 5:
+        while file_size > 5:
             logger.warning(f"图片仍然过大: {file_size:.2f}MB，尝试进一步压缩")
-            # 二次压缩
             img = Image.open(final_path)
             img.save(
                 final_path,
@@ -435,6 +432,7 @@ class Lauretta(Star):
                 optimize=True,
                 progressive=True
             )
+            file_size = final_path.stat().st_size / 1024 / 1024
 
     @filter.command("csonglist")
     async def csonglist(self, event: AstrMessageEvent, usrcc: str):
