@@ -155,6 +155,7 @@ class Lauretta(Star):
     async def exchange_code_1(self, qq_id: str, code: str) -> bool:
         """用授权码换取 token 并存入数据库"""
         try:
+            logger.info("POSTING")
             resp = await asyncio.to_thread(
                 requests.post,
                 "https://maimai.lxns.net/api/v0/oauth/token",
@@ -167,10 +168,12 @@ class Lauretta(Star):
                 },
                 timeout=10
             )
+            logger.info("POSTING COMPLETE")
 
             res_json = resp.json()
             if resp.status_code != 200 or not res_json.get("success"):
                 return False
+            logger.info("GETTING TOKEN DATA")
 
             token_data = res_json["data"]
             access_token = token_data["access_token"]
@@ -218,9 +221,11 @@ class Lauretta(Star):
         #     self.tm.exchange_code, qqid, code.strip()
         # )
 
-        success = await asyncio.to_thread(
-            self.exchange_code_1, qqid, code.strip()
-        )
+        # success = await asyncio.to_thread(
+        #     self.exchange_code_1, qqid, code.strip()
+        # )
+
+        success = await self.exchange_code_1(qqid, code.strip())
 
         if not success:
             yield event.plain_result("❌ 绑定失败，请检查授权码是否正确或是否过期。")
