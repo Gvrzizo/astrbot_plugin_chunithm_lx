@@ -69,6 +69,10 @@ class Lauretta(Star):
             "ssp": "SS+",
             "ss": "SS",
         }
+        self.badgeStyleMap = {
+            "alljustice": ("aj", "AJ"),
+            "fullcombo": ("fc", "FC"),
+        }
         self.ccs = []
         self.ccMap = {}
         tmpi = 0
@@ -523,11 +527,216 @@ class Lauretta(Star):
         #
         # yield event.plain_result("\n".join(msgLines))
 
+    def render_completion_image(self, query_title: str, cc_blocks: list, out_path: str, sender_id: str):
+        """渲染带有用户成绩的完成表图片"""
+        base_dir = self.storagePath
+        env = Environment(loader=FileSystemLoader(base_dir), autoescape=True)
+        template = env.get_template("CCOMPLETE.html")
+
+        html = template.render(
+            query_title=query_title,
+            cc_blocks=cc_blocks,
+            total_songs=sum(len(b["songs"]) for b in cc_blocks)
+        )
+
+        width = 1600
+        songs_per_row = 10
+        rows = 0
+        for b in cc_blocks:
+            songnum = len(b["songs"])
+            rows += (songnum + songs_per_row - 1) // songs_per_row
+        height = 350 + rows * 185 + len(cc_blocks) * 30
+
+        hti = Html2Image(
+            output_path=out_path,
+            size=(width, height),
+            custom_flags=['--force-device-scale-factor=2']
+        )
+
+        tmp_file = f"{sender_id}_Completion_tmp.png"
+        hti.screenshot(
+            html_str=html,
+            save_as=tmp_file
+        )
+
+        tmp_path = Path(out_path) / tmp_file
+        final_path = Path(out_path) / f"{sender_id}_Completion.jpg"
+
+        img = Image.open(tmp_path)
+        if img.mode in ('RGBA', 'LA', 'P'):
+            img = img.convert('RGB')
+
+        img.save(
+            final_path,
+            format='JPEG',
+            quality=85,
+            optimize=True,
+            progressive=True
+        )
+
+        tmp_path.unlink(missing_ok=True)
+
+        file_size = final_path.stat().st_size / 1024 / 1024  # MB
+        if file_size > 10:
+            logger.warning(f"图片仍然过大: {file_size:.2f}MB，尝试进一步压缩")
+            img = Image.open(final_path)
+            img.save(
+                final_path,
+                format='JPEG',
+                quality=75,
+                optimize=True,
+                progressive=True
+            )
+
+    @filter.command("ccompletion")
+    async def ccompletion(self, event: AstrMessageEvent, usrcc: str):
+        """查询某定数/等级的个人成绩完成表"""
+        qqid = event.get_sender_id()
+        usrcc = usrcc.strip()
+
+        # 1. 验证 Token 状态
+        access_token = await self.tm.get_valid_token(qqid)
+        if not access_token:
+            yield event.plain_result("❌ 你还未绑定或授权已过期，请使用 /bind 重新绑定。")
+            return
+
+        # 2. 解析定数范围（复用你原有的解析逻辑）
+        tarccs = []
+        if usrcc in self.ccs:
+            tarccs.append(usrcc)
+        elif usrcc.endswith("+"):
+            baseStr = usrcc[:-1]
+            if baseStr.isdigit():
+                baseVal = int(baseStr)
+                if 7 <= baseVal <= 9:
+                    tarccs.append(f"{baseVal}.5")
+                elif 10 <= baseVal <= 14:
+                    for dec in range(5, 10):
+                        tarccs.append(f"{baseVal}.{dec}")
+                elif baseVal == 15:
+                    for dec in range(5, 8):
+                        tarccs.append(f"{baseVal}.{dec}")
+        elif usrcc.isdigit():
+            baseVal = int(usrcc)
+            if 1 <= baseVal <= 6:
+                tarccs.append(f"{baseVal}.0")
+            elif 7 <= baseVal <= 9:
+                tarccs.append(f"{baseVal}.0")
+                tarccs.append(f"{baseVal}.5")
+            elif 10 <= baseVal <= 15:
+                for dec in range(0, 5):
+                    tarccs.append(f"{baseVal}.{dec}")
+
+        if not tarccs:
+            yield event.plain_result("❌ 请输入合法的定数或等级！\n示例：\n/ccompletion 14+\n/ccompletion 13.2")
+            return
+
+        # 3. 异步请求用户的全部成绩
+        headers = {"Authorization": f"Bearer {access_token}"}
+        try:
+            response = await asyncio.to_thread(requests.get, self.scoresUrl, headers=headers)
+            response.raise_for_status()
+            scoredata = response.json()
+        except Exception as e:
+            yield event.plain_result(f"❌ 请求个人成绩失败: {e}")
+            return
+
+        if not scoredata.get("success"):
+            yield event.plain_result(f"❌ API返回错误: {scoredata.get('message')}")
+            return
+
+        # 4. 建立用户成绩的快速索引 Map：键名为 "songId_levelIndex"
+        user_scores_map = {}
+        for item in scoredata.get("data", []):
+            sid = item.get("id")
+            l_idx = item.get("level_index")
+            if sid is not None and l_idx is not None:
+                user_scores_map[f"{sid}_{l_idx}"] = item
+
+        # 5. 获取玩家个人信息以在标题展示（可选）
+        try:
+            p_res = await asyncio.to_thread(requests.get, self.playerInfoUrl, headers=headers)
+            p_res.raise_for_status()
+            player_name = p_res.json().get("data", {}).get("name", "CHUNITHM")
+        except Exception:
+            player_name = "CHUNITHM"
+
+        # 6. 构建与合并数据结构
+        cc_blocks = []
+        for curcc in tarccs:
+            songs_data = []
+            for songid, diffi in self.ccMap.get(curcc, []):
+                songinfo = self.songMap.get(songid)
+                if not songinfo:
+                    continue
+
+                jacket_path = self._download_jacket(songid)
+
+                # 核心连接点：检查用户是否玩过这首歌的这个难度
+                lookup_key = f"{songid}_{diffi}"
+                played_info = user_scores_map.get(lookup_key)
+
+                is_played = False
+                rank_str = ""
+                rank_class = "OTHER"
+                badge_type = ""
+                badge_name = ""
+
+                if played_info:
+                    is_played = True
+                    # 转换 Rank 展现形式 (如 sss -> SSS, sssp -> SSS+)
+                    raw_rank = played_info.get("rank", "other")
+                    rank_str = self.rankMap.get(raw_rank, raw_rank.upper())
+                    rank_class = raw_rank.upper()  # 传给前端用于做样式定制
+
+                    # 转换 FC/AJ 状态
+                    fc_aj_status = played_info.get("full_combo", "")
+                    if fc_aj_status in self.badgeStyleMap:
+                        badge_type, badge_name = self.badgeStyleMap[fc_aj_status]
+
+                songs_data.append({
+                    "song_id": songid,
+                    "song_name": songinfo.get("title", "未知曲目"),
+                    "diff": diffi,
+                    "diff_name": self.diffiMap.get(diffi, "UNK"),
+                    "jacket_url": f"file://{jacket_path}" if jacket_path else "",
+                    # 个人成绩传递
+                    "played": is_played,
+                    "rank": rank_str,
+                    "rank_class": rank_class,
+                    "badge_type": badge_type,
+                    "badge_name": badge_name
+                })
+
+            if songs_data:
+                cc_blocks.append({
+                    "cc": curcc,
+                    "songs": songs_data
+                })
+
+        if not cc_blocks:
+            yield event.plain_result("⚠️ 未找到对应定数的歌曲")
+            return
+
+        query_title = f"{player_name} 的 {usrcc} 完成表"
+
+        # 7. 投入线程池渲染并发送
+        await asyncio.to_thread(
+            self.render_completion_image,
+            query_title,
+            cc_blocks,
+            str(self.ccPath),
+            event.get_sender_id()
+        )
+
+        yield event.image_result(f"{self.ccPath}/{event.get_sender_id()}_Completion.jpg")
+
     @filter.command("help")
     async def help(self, event: AstrMessageEvent):
         msgLines = ["可用的指令："]
         msgLines.append("/bind -- 绑定落雪账号。请先不带参数直接输入/bind得到授权链接")
         msgLines.append("/caj30 -- 生成中二节奏AJ30")
+        msgLines.append("/csonglist -- 根据定数/等级查歌")
 
         yield event.plain_result("\n".join(msgLines))
 
