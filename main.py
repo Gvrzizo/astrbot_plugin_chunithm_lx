@@ -390,7 +390,7 @@ class Lauretta(Star):
         for b in cc_blocks:
             songnum = len(b["songs"])
             rows += (songnum + songs_per_row - 1) // songs_per_row
-        height = 150 + rows * 190 + len(cc_blocks) * 100
+        height = 150 + rows * 180 + len(cc_blocks) * 20
 
         hti = Html2Image(
             output_path=out_path,
