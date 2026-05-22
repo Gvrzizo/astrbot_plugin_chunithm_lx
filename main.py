@@ -9,6 +9,7 @@ import asyncio
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 from html2image import Html2Image
+from PIL import Image
 from .TokenManager import TokenManager
 
 @register("chunithm_lx", "Lauretta", "中二节奏机器人", "0.1.1")
@@ -364,11 +365,75 @@ class Lauretta(Star):
         height = 200 + len(cc_blocks) * (120 + rows_per_block * 166)  # 头部+每块(标签区+歌曲区)
         height = min(max(height, 900), 4000)  # 限制高度范围
 
-        hti = Html2Image(output_path=out_path, size=(1600, height), custom_flags=['--force-device-scale-factor=3'])
+        hti = Html2Image(output_path=out_path, size=(1600, height))
         hti.screenshot(
             html_str=html,
             save_as=f"{sender_id}_CCQuery.png",
         )
+
+    def render_cc_query_image_utilized(self, query_title: str, cc_blocks: list, out_path: str, sender_id: str):
+        """渲染定数查歌结果图片（优化版）"""
+
+        base_dir = self.storagePath
+        env = Environment(loader=FileSystemLoader(base_dir), autoescape=True)
+        template = env.get_template("CCQuery.html")
+
+        html = template.render(
+            query_title=query_title,
+            cc_blocks=cc_blocks,
+            total_songs=sum(len(b["songs"]) for b in cc_blocks)
+        )
+
+        width = 1600
+        songs_per_row = 5
+        max_songs = max((len(b["songs"]) for b in cc_blocks), default=0)
+        rows = (max_songs + songs_per_row - 1) // songs_per_row if max_songs else 1
+        height = 150 + len(cc_blocks) * (100 + rows * 130)  # 减小高度系数
+        height = min(max(height, 700), 4000)
+
+        # 优化2：降低scale factor
+        hti = Html2Image(
+            output_path=out_path,
+            size=(width, height)
+        )
+
+        tmp_file = f"{sender_id}_CCQuery_tmp.png"
+        hti.screenshot(
+            html_str=html,
+            save_as=tmp_file,
+        )
+
+        tmp_path = Path(out_path) / tmp_file
+        final_path = Path(out_path) / f"{sender_id}_CCQuery.jpg"
+
+        img = Image.open(tmp_path)
+        if img.mode in ('RGBA', 'LA', 'P'):
+            img = img.convert('RGB')
+
+        img.save(
+            final_path,
+            format='JPEG',
+            quality=85,  # 质量85%，平衡清晰度和体积
+            optimize=True,
+            progressive=True
+        )
+
+        # 删除临时文件
+        tmp_path.unlink(missing_ok=True)
+
+        # 检查文件大小
+        file_size = final_path.stat().st_size / 1024 / 1024  # MB
+        if file_size > 5:
+            logger.warning(f"图片仍然过大: {file_size:.2f}MB，尝试进一步压缩")
+            # 二次压缩
+            img = Image.open(final_path)
+            img.save(
+                final_path,
+                format='JPEG',
+                quality=75,
+                optimize=True,
+                progressive=True
+            )
 
     @filter.command("csonglist")
     async def csonglist(self, event: AstrMessageEvent, usrcc: str):
@@ -431,7 +496,7 @@ class Lauretta(Star):
         query_title = f"定数查歌: {', '.join(b['cc'] for b in cc_blocks)}"
 
         await asyncio.to_thread(
-            self.render_cc_query_image,
+            self.render_cc_query_image_utilized,
             query_title,
             cc_blocks,
             str(self.ccPath),  # 输出目录
@@ -439,7 +504,7 @@ class Lauretta(Star):
         )
 
         # total = sum(len(b["songs"]) for b in cc_blocks)
-        yield event.image_result(f"{self.ccPath}/{event.get_sender_id()}_CCQuery.png")
+        yield event.image_result(f"{self.ccPath}/{event.get_sender_id()}_CCQuery.jpg")
 
         # listcc = []
         #
