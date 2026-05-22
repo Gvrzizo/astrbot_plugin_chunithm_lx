@@ -727,6 +727,7 @@ class Lauretta(Star):
                     fc_aj_status = played_info.get("full_combo", "")
                     if fc_aj_status:
                         fc_aj_status = fc_aj_status.upper().replace("+", "P")
+                        fc_aj_status = self.badgeStyleMap.get(fc_aj_status, ["", ""])[1]
 
                     satisfy = False
                     if not is_conditional:
@@ -778,8 +779,7 @@ class Lauretta(Star):
             yield event.plain_result("⚠️ 未找到对应条件的歌曲")
             return
 
-        cond_title = f" [{minrank}以上]" if is_conditional else ""
-        query_title = f"{player_name} 的 {usrcc} {'' if minrank == 'NONE' else minrank} 完成表 ({usrdiff}{'' if only_val else '及以上'}){cond_title}"
+        query_title = f"{player_name} 的 {usrcc} {'' if minrank == 'NONE' else minrank} 完成表 ({usrdiff}{'' if only_val else '及以上'})"
 
         await asyncio.to_thread(
             self.render_completion_image,
