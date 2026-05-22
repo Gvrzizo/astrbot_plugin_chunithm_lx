@@ -390,7 +390,7 @@ class Lauretta(Star):
         for b in cc_blocks:
             songnum = len(b["songs"])
             rows += (songnum + songs_per_row - 1) // songs_per_row
-        height = 150 + rows * 170 + len(cc_blocks) * 30
+        height = 150 + rows * 190 + len(cc_blocks) * 100
 
         hti = Html2Image(
             output_path=out_path,
@@ -422,7 +422,7 @@ class Lauretta(Star):
         tmp_path.unlink(missing_ok=True)
 
         file_size = final_path.stat().st_size / 1024 / 1024  # MB
-        if file_size > 5:
+        if file_size > 10:
             logger.warning(f"图片仍然过大: {file_size:.2f}MB，尝试进一步压缩")
             img = Image.open(final_path)
             img.save(
