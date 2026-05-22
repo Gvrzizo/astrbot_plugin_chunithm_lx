@@ -739,7 +739,7 @@ class Lauretta(Star):
                         elif target_rank in ["FC", "AJ"]:
                             badge_ranks = {"FC": 1, "AJ": 2}
 
-                            if fc_aj_status in badge_ranks and badge_ranks[fc_aj_status] >= badge_ranks[target_rank]:
+                            if fc_aj_status in badge_ranks.keys() and badge_ranks[fc_aj_status] >= badge_ranks[target_rank]:
                                 satisfy = True
 
                     if satisfy:
