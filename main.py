@@ -692,7 +692,7 @@ class Lauretta(Star):
 
         target_rank = minrank.replace("+", "P")
         target_rank = target_rank.upper()
-        if target_rank not in rank_order and target_rank not in ["FC", "AJ"]:
+        if target_rank not in rank_order and target_rank not in ["FC", "AJ"] and target_rank != "NONE":
             yield event.plain_result(
                 "❌ 请输入合法的完成情况！\n"
                 "示例：SSS、SSS+、AJ......"
