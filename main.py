@@ -726,7 +726,6 @@ class Lauretta(Star):
                     raw_rank = played_info.get("rank", "other").upper().replace("+", "P")
                     fc_aj_status = played_info.get("full_combo", "")
                     if fc_aj_status:
-                        fc_aj_status = fc_aj_status.upper().replace("+", "P")
                         fc_aj_status = self.badgeStyleMap.get(fc_aj_status, ["", ""])[1]
 
                     satisfy = False
