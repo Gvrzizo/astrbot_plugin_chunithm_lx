@@ -10,9 +10,6 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 from html2image import Html2Image
 from .TokenManager import TokenManager
-import os
-import time
-import sqlite3
 
 @register("chunithm_lx", "Lauretta", "中二节奏机器人", "0.1.1")
 class Lauretta(Star):
@@ -152,62 +149,9 @@ class Lauretta(Star):
         if not self.songList:
             await self.loadSongFromApi()
 
-    # async def exchange_code_1(self, qq_id: str, code: str) -> bool:
-    #     """用授权码换取 token 并存入数据库"""
-    #     try:
-    #         logger.info("POSTING")
-    #         resp = await asyncio.to_thread(
-    #             requests.post,
-    #             "https://maimai.lxns.net/api/v0/oauth/token",
-    #             json={
-    #                 "client_id": self.clientid,
-    #                 "client_secret": self.clientsecret,
-    #                 "grant_type": "authorization_code",
-    #                 "code": code,
-    #                 "redirect_uri": "urn:ietf:wg:oauth:2.0:oob"
-    #             },
-    #             timeout=10
-    #         )
-    #         logger.info("POSTING COMPLETE")
-    #
-    #         res_json = resp.json()
-    #         if resp.status_code != 200 or not res_json.get("success"):
-    #             return False
-    #         logger.info("GETTING TOKEN DATA")
-    #
-    #         token_data = res_json["data"]
-    #         access_token = token_data["access_token"]
-    #         refresh_token = token_data["refresh_token"]
-    #         expires_in = token_data["expires_in"]
-    #         now = int(time.time())
-    #         logger.info(f"{qq_id}\n{access_token}\n{refresh_token}\n{expires_in}")
-    #         with sqlite3.connect(self.db_path) as conn:
-    #             conn.execute(
-    #                 """INSERT OR REPLACE INTO user_tokens (qq_id, access_token, refresh_token, expires_at)
-    #                    VALUES (?, ?, ?, ?)""",
-    #                 (str(qq_id), access_token, refresh_token, now + expires_in)
-    #             )
-    #             conn.commit()
-    #             return True
-    #     except Exception:
-    #         return False
-
     @filter.command("bind")
     async def bind(self, event: AstrMessageEvent, code: str = ""):
         """OAuth绑定"""
-        # self.apiKey = usrapi
-        # headers = {"X-User-Token": self.apiKey}
-        # try:
-        #     response = await asyncio.to_thread(requests.get, self.playerInfoUrl, headers=headers)
-        #     response.raise_for_status()
-        #     usrdata = response.json()
-        #     if usrdata.get("success"):
-        #         name = usrdata.get("data", {}).get("name", "未知用户")
-        #         yield event.plain_result(f"✅ API绑定成功，用户：{name}")
-        #     else:
-        #         yield event.plain_result(f"❌ API返回错误: {usrdata.get('message')}")
-        # except Exception as e:
-        #     yield event.plain_result(f"❌ 网络请求出错: {e}")
         qqid = event.get_sender_id()
         if not code:
             # 无参数：返回授权链接
@@ -307,10 +251,6 @@ class Lauretta(Star):
         """查询自己的 AJ30"""
         qqid = event.get_sender_id()
 
-        # if not self.apiKey:
-        #     yield event.plain_result("❌ 请先使用 /bind 绑定你的 API Token")
-        #     return
-
         access_token = await self.tm.get_valid_token(qqid)
 
         if not access_token:
@@ -319,7 +259,6 @@ class Lauretta(Star):
             )
             return
 
-        # headers = {"X-User-Token": self.apiKey}
         headers = {"Authorization": f"Bearer {access_token}"}
         try:
             response = await asyncio.to_thread(requests.get, self.scoresUrl, headers=headers)
@@ -379,7 +318,6 @@ class Lauretta(Star):
             msgLines.append(f"{idx}. {song} [{level} ({cc})] {score} {justiceCount}小AJ Rating: {rating:.2f}")
         msgLines.append(f" 你的AJ30为 {(totRat / 30):.2f} ")
 
-        # self.render_aj30_image(playerdata.get("name", "CHUNITHM"), playerdata.get("rating", 0.00), top30, totRat / 30, str(self.bestPath), event.get_sender_id())
         await asyncio.to_thread(
             self.render_aj30_image,
             playerdata.get("name", "CHUNITHM"),
@@ -391,7 +329,6 @@ class Lauretta(Star):
         )
 
         yield event.image_result(str(self.bestPath) + "/" + f"{event.get_sender_id()}_AJ30.png")
-        # yield event.plain_result("\n".join(msgLines))
 
     @filter.command("csonglist")
     async def csonglist(self, event: AstrMessageEvent, usrcc: str):
@@ -445,14 +382,22 @@ class Lauretta(Star):
 
         yield event.plain_result("\n".join(msgLines))
 
-    @filter.command("hello")
-    async def hello(self, event: AstrMessageEvent):
-        name = event.get_sender_name()
-        id = event.get_sender_id()
-        n1 = event.message_obj.group_id
-        n2 = event.message_obj.sender.__str__()
+    @filter.command("help")
+    async def help(self, event: AstrMessageEvent):
+        msgLines = ["可用的指令："]
+        msgLines.append("/bind -- 绑定落雪账号")
+        msgLines.append("/caj30 -- 生成中二节奏AJ30")
 
-        yield event.plain_result(f"{name} {id} {n1} {n2}")
+        yield event.plain_result("\n".join(msgLines))
+
+    # @filter.command("hello")
+    # async def hello(self, event: astrmessageevent):
+    #     name = event.get_sender_name()
+    #     id = event.get_sender_id()
+    #     n1 = event.message_obj.group_id
+    #     n2 = event.message_obj.sender.__str__()
+    #
+    #     yield event.plain_result(f"{name} {id} {n1} {n2}")
 
     async def terminate(self):
         """插件卸载时调用"""
