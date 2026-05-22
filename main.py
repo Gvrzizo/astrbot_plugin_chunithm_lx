@@ -422,7 +422,7 @@ class Lauretta(Star):
         tmp_path.unlink(missing_ok=True)
 
         file_size = final_path.stat().st_size / 1024 / 1024  # MB
-        while file_size > 5:
+        if file_size > 5:
             logger.warning(f"图片仍然过大: {file_size:.2f}MB，尝试进一步压缩")
             img = Image.open(final_path)
             img.save(
@@ -432,7 +432,6 @@ class Lauretta(Star):
                 optimize=True,
                 progressive=True
             )
-            file_size = final_path.stat().st_size / 1024 / 1024
 
     @filter.command("csonglist")
     async def csonglist(self, event: AstrMessageEvent, usrcc: str):
