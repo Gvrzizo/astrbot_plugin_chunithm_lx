@@ -179,7 +179,6 @@ class Lauretta(Star):
                 yield event.plain_result(f"❌ 网络请求出错: {e}")
                 return
         if not code:
-            # 无参数：返回授权链接
             yield event.plain_result(
                 f"🔗 请点击以下链接授权：\n{self.oauthUrl}\n\n"
                 f"授权完成后会得到一个授权码，之后使用 /bind <授权码> 完成绑定。"
@@ -192,7 +191,6 @@ class Lauretta(Star):
             yield event.plain_result("❌ 绑定失败，请检查授权码是否正确或是否过期。")
             return
 
-        # 验证 token 有效性并获取玩家名
         access_token = await self.tm.get_valid_token(qqid)
         if not access_token:
             yield event.plain_result("❌ 绑定失败，无法获取有效令牌。")
@@ -356,29 +354,6 @@ class Lauretta(Star):
         yield event.image_result(str(self.bestPath) + "/" + f"{event.get_sender_id()}_AJ30.png")
 
     def render_cc_query_image(self, query_title: str, cc_blocks: list, out_path: str, sender_id: str):
-        """渲染定数查歌结果图片"""
-        base_dir = self.storagePath
-        env = Environment(loader=FileSystemLoader(base_dir), autoescape=True)
-        template = env.get_template("CSONGLIST.html")
-
-        html = template.render(
-            query_title=query_title,
-            cc_blocks=cc_blocks,
-            total_songs=sum(len(b["songs"]) for b in cc_blocks)
-        )
-
-        songs_per_row = 5
-        rows_per_block = max((len(b["songs"]) + songs_per_row - 1) // songs_per_row for b in cc_blocks) if cc_blocks else 1
-        height = 200 + len(cc_blocks) * (120 + rows_per_block * 166)  # 头部+每块(标签区+歌曲区)
-        height = min(max(height, 900), 4000)  # 限制高度范围
-
-        hti = Html2Image(output_path=out_path, size=(1600, height))
-        hti.screenshot(
-            html_str=html,
-            save_as=f"{sender_id}_CCQuery.png",
-        )
-
-    def render_cc_query_image_utilized(self, query_title: str, cc_blocks: list, out_path: str, sender_id: str):
         """渲染定数查歌结果图片（优化版）"""
 
         base_dir = self.storagePath
@@ -440,7 +415,7 @@ class Lauretta(Star):
                 progressive=True
             )
 
-    @filter.command("csonglist")
+    @filter.command("csonglist", alias={"csl"})
     async def csonglist(self, event: AstrMessageEvent, usrcc: str):
         """定数查歌"""
         usrcc = usrcc.strip()
@@ -501,34 +476,15 @@ class Lauretta(Star):
         query_title = f"定数查歌: {', '.join(b['cc'] for b in cc_blocks)}"
 
         await asyncio.to_thread(
-            self.render_cc_query_image_utilized,
+            self.render_cc_query_image,
             query_title,
             cc_blocks,
-            str(self.ccPath),  # 输出目录
+            str(self.ccPath),
             event.get_sender_id()
         )
 
-        # total = sum(len(b["songs"]) for b in cc_blocks)
         yield event.image_result(f"{self.ccPath}/{event.get_sender_id()}_CCQuery.jpg")
 
-        # listcc = []
-        #
-        # msgLines = []
-        # for curcc in tarccs:
-        #     listcc.append({"cc": curcc, "songs": []})
-        #     msgLines.append(f"定数为{curcc}的歌曲列表如下：")
-        #     idx = 1
-        #     for i in self.ccMap[curcc]:
-        #         songid = i[0]
-        #         songdiffi = i[1]
-        #         songinfo = self.songMap[songid]
-        #         songname = songinfo.get("title", "未知曲目")
-        #         listcc[-1]["songs"].append([songid, songdiffi])
-        #         msgLines.append(f"{idx}. {songname} [{self.diffiMap[songdiffi]}]")
-        #         idx += 1
-        #     msgLines.append(" ")
-        #
-        # yield event.plain_result("\n".join(msgLines))
 
     def render_completion_image(self, query_title: str, cc_blocks: list, out_path: str, sender_id: str):
         """渲染带有用户成绩的完成表图片"""
@@ -591,7 +547,7 @@ class Lauretta(Star):
                 progressive=True
             )
 
-    @filter.command("ccomplete")
+    @filter.command("ccomplete", alias={"cc", "ccpt"})
     async def ccomplete(self, event: AstrMessageEvent, usrcc: str, usrdiff: str = "BASIC", only: str = "0", minrank: str = "NONE"):
         """查询某定数/等级的个人成绩完成表"""
         qqid = event.get_sender_id()
@@ -721,6 +677,7 @@ class Lauretta(Star):
                 rank_class = "OTHER"
                 badge_type = ""
                 badge_name = ""
+                satis_cnt = 0
 
                 if played_info:
                     raw_rank = played_info.get("rank", "other").upper().replace("+", "P")
@@ -735,11 +692,13 @@ class Lauretta(Star):
                         if target_rank in rank_order:
                             if raw_rank in rank_order and rank_order[raw_rank] >= rank_order[target_rank]:
                                 satisfy = True
+                                satis_cnt += 1
                         elif target_rank in ["FC", "AJ"]:
                             badge_ranks = {"FC": 1, "AJ": 2}
 
                             if fc_aj_status in badge_ranks.keys() and badge_ranks[fc_aj_status] >= badge_ranks[target_rank]:
                                 satisfy = True
+                                satis_cnt += 1
 
                     if satisfy:
                         is_played = True
