@@ -450,7 +450,7 @@ class Lauretta(Star):
                     for dec in range(5, 10):
                         tarccs.append(f"{baseVal}.{dec}")
                 elif baseVal == 15:
-                    for dec in range(5, 7):
+                    for dec in range(5, 8):
                         tarccs.append(f"{baseVal}.{dec}")
         elif usrcc.isdigit():
             baseVal = int(usrcc)
