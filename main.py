@@ -33,7 +33,13 @@ class Lauretta(Star):
         self.jacketPath.mkdir(parents=True, exist_ok=True)
         self.bestPath = self.storagePath / "best"
         self.bestPath.mkdir(parents=True, exist_ok=True)
+        self.oauthPath = self.storagePath / "oauth"
+        self.oauthidFile = self.oauthPath / "clientid"
+        self.oauthsecretFile = self.oauthPath / "clientsecret"
         self.songCacheFile = self.storagePath / "songs.json"
+
+        self.clientid = self.oauthidFile.read_text(encoding = "utf-8").strip()
+        self.clientsecret = self.oauthsecretFile.read_text(encoding = "utf-8").strip()
 
         self.diffiMap = {
             0: "BASIC",
@@ -331,6 +337,15 @@ class Lauretta(Star):
             msgLines.append(" ")
 
         yield event.plain_result("\n".join(msgLines))
+
+    @filter.command("hello")
+    async def hello(self, event: AstrMessageEvent):
+        name = event.get_sender_name()
+        id = event.get_sender_id()
+        n1 = event.message_obj.group_id
+        n2 = event.message_obj.sender.__str__()
+
+        yield event.plain_result(f"{name} {id} {n1} {n2}")
 
     async def terminate(self):
         """插件卸载时调用"""
