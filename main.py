@@ -724,7 +724,9 @@ class Lauretta(Star):
 
                 if played_info:
                     raw_rank = played_info.get("rank", "other").upper().replace("+", "P")
-                    fc_aj_status = played_info.get("full_combo", "").upper().replace("+", "P")
+                    fc_aj_status = played_info.get("full_combo", "")
+                    if fc_aj_status:
+                        fc_aj_status = fc_aj_status.upper().replace("+", "P")
 
                     satisfy = False
                     if not is_conditional:
