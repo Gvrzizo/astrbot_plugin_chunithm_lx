@@ -11,6 +11,8 @@ from jinja2 import Environment, FileSystemLoader
 from html2image import Html2Image
 from .TokenManager import TokenManager
 import os
+import time
+import sqlite3
 
 @register("chunithm_lx", "Lauretta", "中二节奏机器人", "0.1.1")
 class Lauretta(Star):
@@ -36,6 +38,7 @@ class Lauretta(Star):
         self.bestPath = self.storagePath / "best"
         self.bestPath.mkdir(parents=True, exist_ok=True)
         self.oauthPath = self.storagePath / "oauth"
+        self.db_path = str(self.storagePath / "tokens.db")
         self.oauthidFile = self.oauthPath / "clientid"
         self.oauthsecretFile = self.oauthPath / "clientsecret"
         self.songCacheFile = self.storagePath / "songs.json"
@@ -149,6 +152,43 @@ class Lauretta(Star):
         if not self.songList:
             await self.loadSongFromApi()
 
+    async def exchange_code_1(self, qq_id: str, code: str) -> bool:
+        """用授权码换取 token 并存入数据库"""
+        try:
+            resp = await asyncio.to_thread(
+                requests.post,
+                "https://maimai.lxns.net/api/v0/oauth/token",
+                json={
+                    "client_id": self.clientid,
+                    "client_secret": self.clientsecret,
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "redirect_uri": "urn:ietf:wg:oauth:2.0:oob"
+                },
+                timeout=10
+            )
+
+            res_json = resp.json()
+            if resp.status_code != 200 or not res_json.get("success"):
+                return False
+
+            token_data = res_json["data"]
+            access_token = token_data["access_token"]
+            refresh_token = token_data["refresh_token"]
+            expires_in = token_data["expires_in"]
+            now = int(time.time())
+            logger.info(f"{qq_id}\n{access_token}\n{refresh_token}\n{expires_in}")
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(
+                    """INSERT OR REPLACE INTO user_tokens (qq_id, access_token, refresh_token, expires_at)
+                       VALUES (?, ?, ?, ?)""",
+                    (str(qq_id), access_token, refresh_token, now + expires_in)
+                )
+                conn.commit()
+                return True
+        except Exception:
+            return False
+
     @filter.command("bind")
     async def bind(self, event: AstrMessageEvent, code: str = ""):
         """OAuth绑定"""
@@ -174,8 +214,12 @@ class Lauretta(Star):
             )
             return
 
+        # success = await asyncio.to_thread(
+        #     self.tm.exchange_code, qqid, code.strip()
+        # )
+
         success = await asyncio.to_thread(
-            self.tm.exchange_code, qqid, code.strip()
+            self.exchange_code_1, qqid, code.strip()
         )
 
         if not success:
