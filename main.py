@@ -12,7 +12,7 @@ from html2image import Html2Image
 from PIL import Image
 from .TokenManager import TokenManager
 
-@register("chunithm_lx", "Lauretta", "中二节奏机器人", "0.1.1")
+@register("chunithm_lx", "Lauretta", "中二节奏机器人", "0.2.0")
 class Lauretta(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -298,7 +298,7 @@ class Lauretta(Star):
         scoreList = scoredata.get("data", [])
         ajRecords = []
         for item in scoreList:
-            if item.get("full_combo") == "alljustice":
+            if item.get("full_combo") == "alljustice" or item.get("full_combo") == "alljusticecritical":
                 ajRecords.append({
                     "song_id": item.get("id", "0"),
                     "song_name": item.get("song_name", "未知曲目"),
