@@ -658,6 +658,7 @@ class Lauretta(Star):
             )
             return
         is_conditional = target_rank in rank_order or target_rank in ["FC", "AJ", "AJC"]
+        satis_cnt = 0
 
         cc_blocks = []
         for curcc in tarccs:
@@ -680,7 +681,6 @@ class Lauretta(Star):
                 rank_class = "OTHER"
                 badge_type = ""
                 badge_name = ""
-                satis_cnt = 0
 
                 if played_info:
                     raw_rank = played_info.get("rank", "other").upper().replace("+", "P")
