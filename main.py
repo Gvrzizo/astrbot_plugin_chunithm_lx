@@ -75,6 +75,7 @@ class Lauretta(Star):
         self.badgeStyleMap = {
             "alljustice": ("aj", "AJ"),
             "fullcombo": ("fc", "FC"),
+            "alljusticecritical": ("ajc", "AJC")
         }
         self.ccs = []
         self.ccMap = {}
@@ -648,13 +649,13 @@ class Lauretta(Star):
 
         target_rank = minrank.replace("+", "P")
         target_rank = target_rank.upper()
-        if target_rank not in rank_order and target_rank not in ["FC", "AJ"] and target_rank != "NONE":
+        if target_rank not in rank_order and target_rank not in ["FC", "AJ", "AJC"] and target_rank != "NONE":
             yield event.plain_result(
                 "❌ 请输入合法的完成情况！\n"
                 "示例：SSS、SSS+、AJ......"
             )
             return
-        is_conditional = target_rank in rank_order or target_rank in ["FC", "AJ"]
+        is_conditional = target_rank in rank_order or target_rank in ["FC", "AJ", "AJC"]
 
         cc_blocks = []
         for curcc in tarccs:
@@ -693,8 +694,8 @@ class Lauretta(Star):
                             if raw_rank in rank_order and rank_order[raw_rank] >= rank_order[target_rank]:
                                 satisfy = True
                                 satis_cnt += 1
-                        elif target_rank in ["FC", "AJ"]:
-                            badge_ranks = {"FC": 1, "AJ": 2}
+                        elif target_rank in ["FC", "AJ", "AJC"]:
+                            badge_ranks = {"FC": 1, "AJ": 2, "AJC": 3}
 
                             if fc_aj_status in badge_ranks.keys() and badge_ranks[fc_aj_status] >= badge_ranks[target_rank]:
                                 satisfy = True
