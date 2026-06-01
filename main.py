@@ -12,7 +12,7 @@ from html2image import Html2Image
 from PIL import Image
 from .TokenManager import TokenManager
 
-@register("chunithm_lx", "Lauretta", "中二节奏机器人", "0.2.0")
+@register("chunithm_lx", "Lauretta", "中二节奏机器人", "0.2.1")
 class Lauretta(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -487,7 +487,7 @@ class Lauretta(Star):
         yield event.image_result(f"{self.ccPath}/{event.get_sender_id()}_CCQuery.jpg")
 
 
-    def render_completion_image(self, query_title: str, cc_blocks: list, out_path: str, sender_id: str):
+    def render_completion_image(self, query_title: str, satis_cnt: int, is_conditional: bool, cc_blocks: list, out_path: str, sender_id: str):
         """渲染带有用户成绩的完成表图片"""
         base_dir = self.storagePath
         env = Environment(loader=FileSystemLoader(base_dir), autoescape=True)
@@ -495,6 +495,8 @@ class Lauretta(Star):
 
         html = template.render(
             query_title=query_title,
+            satis_cnt=satis_cnt,
+            is_conditional=is_conditional,
             cc_blocks=cc_blocks,
             total_songs=sum(len(b["songs"]) for b in cc_blocks)
         )
@@ -743,6 +745,8 @@ class Lauretta(Star):
         await asyncio.to_thread(
             self.render_completion_image,
             query_title,
+            satis_cnt,
+            is_conditional,
             cc_blocks,
             str(self.ccPath),
             event.get_sender_id()
