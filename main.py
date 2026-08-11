@@ -128,12 +128,16 @@ class Lauretta(Star):
             if sver not in self.songs_by_version:
                 self.songs_by_version[sver] = []
             for d in diffs:
-                self.songs_by_version[sver].append([sid, d.get("difficulty", 0)])
+                diff = d.get("difficulty", 0)
+                if diff == 5: continue
+                self.songs_by_version[sver].append([sid, diff])
 
             if sgenre not in self.songs_by_genre:
                 self.songs_by_genre[sgenre] = []
             for d in diffs:
-                self.songs_by_genre[sgenre].append([sid, d.get("difficulty", 0)])
+                diff = d.get("difficulty", 0)
+                if diff == 5: continue
+                self.songs_by_genre[sgenre].append([sid, diff])
 
         for lst in self.songs_by_version.values():
             lst.sort(key=lambda x: x[1])
