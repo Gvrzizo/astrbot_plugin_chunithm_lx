@@ -93,39 +93,215 @@ class Lauretta(Star):
 
         self.songList = []
         self.songMap = {}
+        self.versions = []
+        self.genres = []
+        self.version_by_title = {}
+        self.version_by_value = {}
+        self.genre_by_name = {}
+        self.songs_by_version = {}
+        self.songs_by_genre = {}
         self._loadSongCache()
+        self._build_meta_maps()
+
+    def _build_meta_maps(self):
+        self.version_by_title = {}
+        self.version_by_value = {}
+        for v in self.versions:
+            title = v.get("title", "")
+            ver_val = v.get("version", 0)
+            self.version_by_title[title.lower()] = ver_val
+            self.version_by_value[ver_val] = title
+
+        self.genre_by_name = {}
+        for g in self.genres:
+            name = g.get("genre", "")
+            self.genre_by_name[name.lower()] = name
+
+        self.songs_by_version = {}
+        self.songs_by_genre = {}
+        for song in self.songList:
+            sid = song.get("id", 0)
+            sver = song.get("version", 0)
+            sgenre = song.get("genre", "")
+            diffs = song.get("difficulties", [])
+
+            if sver not in self.songs_by_version:
+                self.songs_by_version[sver] = []
+            for d in diffs:
+                self.songs_by_version[sver].append([sid, d.get("difficulty", 0)])
+
+            if sgenre not in self.songs_by_genre:
+                self.songs_by_genre[sgenre] = []
+            for d in diffs:
+                self.songs_by_genre[sgenre].append([sid, d.get("difficulty", 0)])
+
+        for lst in self.songs_by_version.values():
+            lst.sort(key=lambda x: x[1])
+        for lst in self.songs_by_genre.values():
+            lst.sort(key=lambda x: x[1])
+
+    def _parse_cc(self, usrcc: str):
+        """解析 CC 字符串，返回目标定数列表（可能为空）"""
+        tarccs = []
+        if usrcc in self.ccs:
+            tarccs.append(usrcc)
+        elif usrcc.endswith("+"):
+            baseStr = usrcc[:-1]
+            if baseStr.isdigit():
+                baseVal = int(baseStr)
+                if 7 <= baseVal <= 9:
+                    tarccs.append(f"{baseVal}.5")
+                elif 10 <= baseVal <= 14:
+                    for dec in range(5, 10):
+                        tarccs.append(f"{baseVal}.{dec}")
+                elif baseVal == 15:
+                    for dec in range(5, 8):
+                        tarccs.append(f"{baseVal}.{dec}")
+        elif usrcc.isdigit():
+            baseVal = int(usrcc)
+            if 1 <= baseVal <= 6:
+                tarccs.append(f"{baseVal}.0")
+            elif 7 <= baseVal <= 9:
+                tarccs.append(f"{baseVal}.0")
+                tarccs.append(f"{baseVal}.5")
+            elif 10 <= baseVal <= 15:
+                for dec in range(0, 5):
+                    tarccs.append(f"{baseVal}.{dec}")
+        return tarccs
+
+    def _detect_query_type(self, usrcc: str):
+        """检测查询类型，返回 ("cc", tarccs) / ("version", ver_val) / ("genre", name) / (None, None)"""
+        tarccs = self._parse_cc(usrcc)
+        if tarccs:
+            return "cc", tarccs
+
+        usrcc_lower = usrcc.lower().strip()
+
+        for title, ver_val in self.version_by_title.items():
+            if title == usrcc_lower:
+                return "version", ver_val
+        for title, ver_val in self.version_by_title.items():
+            if usrcc_lower in title:
+                return "version", ver_val
+
+        for name_lower, name in self.genre_by_name.items():
+            if name_lower == usrcc_lower:
+                return "genre", name
+        for name_lower, name in self.genre_by_name.items():
+            if usrcc_lower in name_lower:
+                return "genre", name
+
+        return None, None
+
+    def _build_song_entry(self, song_id, diffi, user_scores_map, rank_order, target_rank, is_conditional):
+        satis_inc = 0
+        songinfo = self.songMap.get(song_id)
+        if not songinfo:
+            return None, satis_inc
+
+        jacket_path = self._download_jacket(song_id)
+        lookup_key = f"{song_id}_{diffi}"
+        played_info = user_scores_map.get(lookup_key)
+
+        is_played = False
+        show_check = False
+        rank_str = ""
+        rank_class = "OTHER"
+        badge_type = ""
+        badge_name = ""
+
+        if played_info:
+            raw_rank = played_info.get("rank", "other").upper().replace("+", "P")
+            fc_aj_status = played_info.get("full_combo", "")
+            if fc_aj_status:
+                fc_aj_status = self.badgeStyleMap.get(fc_aj_status, ["", ""])[1]
+
+            satisfy = False
+            if not is_conditional:
+                satisfy = True
+            else:
+                if target_rank in rank_order:
+                    if raw_rank in rank_order and rank_order[raw_rank] >= rank_order[target_rank]:
+                        satisfy = True
+                        satis_inc = 1
+                elif target_rank in ["FC", "AJ", "AJC"]:
+                    badge_ranks = {"FC": 1, "AJ": 2, "AJC": 3}
+                    if fc_aj_status in badge_ranks and badge_ranks[fc_aj_status] >= badge_ranks[target_rank]:
+                        satisfy = True
+                        satis_inc = 1
+
+            if satisfy:
+                is_played = True
+                if is_conditional:
+                    show_check = True
+                else:
+                    raw_rank_lower = played_info.get("rank", "other")
+                    rank_str = self.rankMap.get(raw_rank_lower, raw_rank_lower.upper())
+                    rank_class = raw_rank_lower.upper()
+                    raw_fc = played_info.get("full_combo", "")
+                    if raw_fc in self.badgeStyleMap:
+                        badge_type, badge_name = self.badgeStyleMap[raw_fc]
+
+        entry = {
+            "song_id": song_id,
+            "song_name": songinfo.get("title", "未知曲目"),
+            "diff": diffi,
+            "diff_name": self.diffiMap.get(diffi, "UNK"),
+            "jacket_url": f"file://{jacket_path}" if jacket_path else "",
+            "played": is_played,
+            "show_check": show_check,
+            "rank": rank_str,
+            "rank_class": rank_class,
+            "badge_type": badge_type,
+            "badge_name": badge_name,
+        }
+        return entry, satis_inc
 
     def _loadSongCache(self):
         """从本地文件加载歌曲列表"""
-        if self.songCacheFile.exists():
-            try:
-                with open(self.songCacheFile, 'r', encoding='utf-8') as f:
-                    self.songList = json.load(f)
-                for i in self.songList:
-                    isongid = i.get("id", 0)
-                    self.songMap[isongid] = i
-                    differ = i.get("difficulties", [])
-                    if not differ:
-                        continue
-                    for k in differ:
-                        oricc = k.get("level_value", 0)
-                        diffi = k.get("difficulty", 0)
-                        cc = str(round(float(oricc), 1))
-                        self.ccMap[cc].append([isongid, diffi])
-                for i in self.ccMap.values():
-                    i.sort(key = lambda x: x[1])
-                logger.info(f"已从缓存加载 {len(self.songList)} 首歌曲")
-            except Exception as e:
-                logger.error(f"加载歌曲缓存失败: {e}")
-                self.songList = []
-                self.songMap = {}
+        if not self.songCacheFile.exists():
+            return
+        try:
+            with open(self.songCacheFile, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                self.songList = data
+                self.versions = []
+                self.genres = []
+            else:
+                self.songList = data.get("songs", [])
+                self.versions = data.get("versions", [])
+                self.genres = data.get("genres", [])
+            for i in self.songList:
+                isongid = i.get("id", 0)
+                self.songMap[isongid] = i
+                differ = i.get("difficulties", [])
+                if not differ:
+                    continue
+                for k in differ:
+                    oricc = k.get("level_value", 0)
+                    diffi = k.get("difficulty", 0)
+                    cc = str(round(float(oricc), 1))
+                    self.ccMap[cc].append([isongid, diffi])
+            for i in self.ccMap.values():
+                i.sort(key = lambda x: x[1])
+            logger.info(f"已从缓存加载 {len(self.songList)} 首歌曲, {len(self.versions)} 个版本, {len(self.genres)} 个分类")
+        except Exception as e:
+            logger.error(f"加载歌曲缓存失败: {e}")
+            self.songList = []
+            self.songMap = {}
 
     def _saveSongCache(self, songs):
         """保存歌曲列表到本地"""
         try:
+            cache_data = {
+                "songs": songs,
+                "versions": self.versions,
+                "genres": self.genres,
+            }
             with open(self.songCacheFile, 'w', encoding='utf-8') as f:
-                json.dump(songs, f, ensure_ascii=False, indent=2)
-            logger.info(f"已缓存 {len(songs)} 首歌曲")
+                json.dump(cache_data, f, ensure_ascii=False, indent=2)
+            logger.info(f"已缓存 {len(songs)} 首歌曲, {len(self.versions)} 个版本, {len(self.genres)} 个分类")
         except Exception as e:
             logger.error(f"保存歌曲缓存失败: {e}")
 
@@ -135,6 +311,8 @@ class Lauretta(Star):
             response = await asyncio.to_thread(requests.get, self.songListUrl, params={"notes": "true"})
             response.raise_for_status()
             data = response.json()
+            self.versions = data.get("versions", [])
+            self.genres = data.get("genres", [])
             songs = data.get("songs", [])
             self.songList = songs
             for i in self.songList:
@@ -149,9 +327,10 @@ class Lauretta(Star):
                     cc = str(round(float(oricc), 1))
                     self.ccMap[cc].append([isongid, diffi])
             self._saveSongCache(songs)
+            self._build_meta_maps()
             for i in self.ccMap.values():
                 i.sort(key = lambda x: x[1])
-            logger.info(f"从网络获取歌曲列表成功，共 {len(songs)} 首")
+            logger.info(f"从网络获取歌曲列表成功，共 {len(songs)} 首, {len(self.versions)} 个版本, {len(self.genres)} 个分类")
         except Exception as e:
             logger.error(f"网络请求出错: {e}")
 
@@ -420,31 +599,7 @@ class Lauretta(Star):
     async def csonglist(self, event: AstrMessageEvent, usrcc: str):
         """定数查歌"""
         usrcc = usrcc.strip()
-        tarccs = []
-        if usrcc in self.ccs:
-            tarccs.append(usrcc)
-        elif usrcc.endswith("+"):
-            baseStr = usrcc[:-1]
-            if baseStr.isdigit():
-                baseVal = int(baseStr)
-                if 7 <= baseVal <= 9:
-                    tarccs.append(f"{baseVal}.5")
-                elif 10 <= baseVal <= 14:
-                    for dec in range(5, 10):
-                        tarccs.append(f"{baseVal}.{dec}")
-                elif baseVal == 15:
-                    for dec in range(5, 8):
-                        tarccs.append(f"{baseVal}.{dec}")
-        elif usrcc.isdigit():
-            baseVal = int(usrcc)
-            if 1 <= baseVal <= 6:
-                tarccs.append(f"{baseVal}.0")
-            elif 7 <= baseVal <= 9:
-                tarccs.append(f"{baseVal}.0")
-                tarccs.append(f"{baseVal}.5")
-            elif 10 <= baseVal <= 15:
-                for dec in range(0, 5):
-                    tarccs.append(f"{baseVal}.{dec}")
+        tarccs = self._parse_cc(usrcc)
         if not tarccs:
             yield event.plain_result("❌ 请输入合法的定数或等级！\n示例：\n/csonglist 14+\n/csonglist 15.3")
             return
@@ -551,8 +706,8 @@ class Lauretta(Star):
             )
 
     @filter.command("ccomplete", alias={"cc", "ccpt"})
-    async def ccomplete(self, event: AstrMessageEvent, usrcc: str, usrdiff: str = "BASIC", only: str = "0", minrank: str = "NONE"):
-        """查询某定数/等级的个人成绩完成表"""
+    async def ccomplete(self, event: AstrMessageEvent, usrcc: str, usrdiff: str = "BASIC", only: str = "0", minrank: str = "NONE", expbelow: str = "0"):
+        """查询某定数/等级/版本/分类的个人成绩完成表"""
         qqid = event.get_sender_id()
         usrcc = usrcc.strip()
         minrank = minrank.strip().upper()
@@ -569,16 +724,34 @@ class Lauretta(Star):
             )
             return
 
-        if not usrdiff.isalpha():
-            yield event.plain_result("❌ 请输入合法的难度！\n示例：\n/ccomplete 14+ MASTER\n/ccomplete 13.2 expert")
+        query_type, query_data = self._detect_query_type(usrcc)
+        if query_type is None:
+            yield event.plain_result(
+                "❌ 无法识别查询类型！\n"
+                "请输入合法的定数（如14+，15.3）、版本名（如amazon）或分类名（如pops & anime）。\n"
+                "示例：\n/cc 14+ MASTER\n/cc AMAZON\n/cc original"
+            )
             return
 
-        usrdiff = usrdiff.upper()
-        if usrdiff not in self.diffiInverted.keys():
-            yield event.plain_result("❌ 请输入合法的难度！\n示例：\n/ccomplete 14+ MASTER 0\n/ccomplete 13.2 expert 1")
+        try:
+            expbelow_val = bool(int(expbelow))
+        except ValueError:
+            yield event.plain_result("❌ expbelow参数只能为0（默认不显示EXPERT及以下难度）或者1（显示所有难度）！")
             return
 
-        minDiffi = self.diffiInverted[usrdiff]
+        if query_type in ("version", "genre") and not expbelow_val:
+            minDiffi = 3
+            usrdiff = "MASTER"
+        else:
+            if not usrdiff.isalpha():
+                yield event.plain_result("❌ 请输入合法的难度！\n示例：\n/ccomplete 14+ MASTER\n/ccomplete AMAZON expert")
+                return
+            usrdiff = usrdiff.upper()
+            if usrdiff not in self.diffiInverted:
+                yield event.plain_result("❌ 请输入合法的难度！\n示例：\n/ccomplete 14+ MASTER 0\n/ccomplete 13.2 expert 1")
+                return
+            minDiffi = self.diffiInverted[usrdiff]
+
         if only_val:
             diffiList = [minDiffi]
         else:
@@ -587,36 +760,6 @@ class Lauretta(Star):
         access_token = await self.tm.get_valid_token(qqid)
         if not access_token:
             yield event.plain_result("❌ 你还未绑定或授权已过期，请使用 /bind 重新绑定。")
-            return
-
-        tarccs = []
-        if usrcc in self.ccs:
-            tarccs.append(usrcc)
-        elif usrcc.endswith("+"):
-            baseStr = usrcc[:-1]
-            if baseStr.isdigit():
-                baseVal = int(baseStr)
-                if 7 <= baseVal <= 9:
-                    tarccs.append(f"{baseVal}.5")
-                elif 10 <= baseVal <= 14:
-                    for dec in range(5, 10):
-                        tarccs.append(f"{baseVal}.{dec}")
-                elif baseVal == 15:
-                    for dec in range(5, 8):
-                        tarccs.append(f"{baseVal}.{dec}")
-        elif usrcc.isdigit():
-            baseVal = int(usrcc)
-            if 1 <= baseVal <= 6:
-                tarccs.append(f"{baseVal}.0")
-            elif 7 <= baseVal <= 9:
-                tarccs.append(f"{baseVal}.0")
-                tarccs.append(f"{baseVal}.5")
-            elif 10 <= baseVal <= 15:
-                for dec in range(0, 5):
-                    tarccs.append(f"{baseVal}.{dec}")
-
-        if not tarccs:
-            yield event.plain_result("❌ 请输入合法的定数或等级！\n示例：\n/ccomplete 14+\n/ccomplete 13.2")
             return
 
         headers = {"Authorization": f"Bearer {access_token}"}
@@ -649,8 +792,7 @@ class Lauretta(Star):
         rank_order = {"D": 1, "C": 2, "B": 3, "BB": 4, "BBB": 5, "A": 6, "AA": 7, "AAA": 8,
                       "S": 9, "SP": 10, "SS": 11, "SSP": 12, "SSS": 13, "SSSP": 14}
 
-        target_rank = minrank.replace("+", "P")
-        target_rank = target_rank.upper()
+        target_rank = minrank.replace("+", "P").upper()
         if target_rank not in rank_order and target_rank not in ["FC", "AJ", "AJC"] and target_rank != "NONE":
             yield event.plain_result(
                 "❌ 请输入合法的完成情况！\n"
@@ -660,87 +802,72 @@ class Lauretta(Star):
         is_conditional = target_rank in rank_order or target_rank in ["FC", "AJ", "AJC"]
         satis_cnt = 0
 
-        cc_blocks = []
-        for curcc in tarccs:
-            songs_data = []
-            for songid, diffi in self.ccMap.get(curcc, []):
+        if query_type == "cc":
+            tarccs = query_data
+            query_label = ", ".join(tarccs)
+            cc_blocks = []
+            for curcc in tarccs:
+                songs_data = []
+                for songid, diffi in self.ccMap.get(curcc, []):
+                    if diffi not in diffiList:
+                        continue
+                    entry, inc = self._build_song_entry(songid, diffi, user_scores_map, rank_order, target_rank, is_conditional)
+                    if entry is not None:
+                        songs_data.append(entry)
+                        satis_cnt += inc
+                if songs_data:
+                    cc_blocks.append({"cc": curcc, "songs": songs_data})
+        elif query_type == "version":
+            song_list = self.songs_by_version.get(query_data, [])
+            query_label = self.version_by_value.get(query_data, usrcc)
+            cc_groups = {}
+            for song_id, diffi in song_list:
                 if diffi not in diffiList:
                     continue
-
-                songinfo = self.songMap.get(songid)
-                if not songinfo:
+                cc = str(round(float(self.songMap[song_id]["difficulties"][diffi]["level_value"]), 1))
+                if cc not in cc_groups:
+                    cc_groups[cc] = []
+                cc_groups[cc].append((song_id, diffi))
+            cc_blocks = []
+            for cc in sorted(cc_groups.keys(), key=float):
+                songs_data = []
+                for song_id, diffi in cc_groups[cc]:
+                    entry, inc = self._build_song_entry(song_id, diffi, user_scores_map, rank_order, target_rank, is_conditional)
+                    if entry is not None:
+                        songs_data.append(entry)
+                        satis_cnt += inc
+                if songs_data:
+                    cc_blocks.append({"cc": cc, "songs": songs_data})
+        else:
+            song_list = self.songs_by_genre.get(query_data, [])
+            query_label = query_data
+            cc_groups = {}
+            for song_id, diffi in song_list:
+                if diffi not in diffiList:
                     continue
-
-                jacket_path = self._download_jacket(songid)
-                lookup_key = f"{songid}_{diffi}"
-                played_info = user_scores_map.get(lookup_key)
-
-                is_played = False
-                show_check = False
-                rank_str = ""
-                rank_class = "OTHER"
-                badge_type = ""
-                badge_name = ""
-
-                if played_info:
-                    raw_rank = played_info.get("rank", "other").upper().replace("+", "P")
-                    fc_aj_status = played_info.get("full_combo", "")
-                    if fc_aj_status:
-                        fc_aj_status = self.badgeStyleMap.get(fc_aj_status, ["", ""])[1]
-
-                    satisfy = False
-                    if not is_conditional:
-                        satisfy = True
-                    else:
-                        if target_rank in rank_order:
-                            if raw_rank in rank_order and rank_order[raw_rank] >= rank_order[target_rank]:
-                                satisfy = True
-                                satis_cnt += 1
-                        elif target_rank in ["FC", "AJ", "AJC"]:
-                            badge_ranks = {"FC": 1, "AJ": 2, "AJC": 3}
-
-                            if fc_aj_status in badge_ranks.keys() and badge_ranks[fc_aj_status] >= badge_ranks[target_rank]:
-                                satisfy = True
-                                satis_cnt += 1
-
-                    if satisfy:
-                        is_played = True
-                        if is_conditional:
-                            show_check = True
-                        else:
-                            raw_rank_lower = played_info.get("rank", "other")
-                            rank_str = self.rankMap.get(raw_rank_lower, raw_rank_lower.upper())
-                            rank_class = raw_rank_lower.upper()
-
-                            raw_fc = played_info.get("full_combo", "")
-                            if raw_fc in self.badgeStyleMap:
-                                badge_type, badge_name = self.badgeStyleMap[raw_fc]
-
-                songs_data.append({
-                    "song_id": songid,
-                    "song_name": songinfo.get("title", "未知曲目"),
-                    "diff": diffi,
-                    "diff_name": self.diffiMap.get(diffi, "UNK"),
-                    "jacket_url": f"file://{jacket_path}" if jacket_path else "",
-                    "played": is_played,
-                    "show_check": show_check,
-                    "rank": rank_str,
-                    "rank_class": rank_class,
-                    "badge_type": badge_type,
-                    "badge_name": badge_name
-                })
-
-            if songs_data:
-                cc_blocks.append({
-                    "cc": curcc,
-                    "songs": songs_data
-                })
+                cc = str(round(float(self.songMap[song_id]["difficulties"][diffi]["level_value"]), 1))
+                if cc not in cc_groups:
+                    cc_groups[cc] = []
+                cc_groups[cc].append((song_id, diffi))
+            cc_blocks = []
+            for cc in sorted(cc_groups.keys(), key=float):
+                songs_data = []
+                for song_id, diffi in cc_groups[cc]:
+                    entry, inc = self._build_song_entry(song_id, diffi, user_scores_map, rank_order, target_rank, is_conditional)
+                    if entry is not None:
+                        songs_data.append(entry)
+                        satis_cnt += inc
+                if songs_data:
+                    cc_blocks.append({"cc": cc, "songs": songs_data})
 
         if not cc_blocks:
             yield event.plain_result("⚠️ 未找到对应条件的歌曲")
             return
 
-        query_title = f"{player_name} 的 {usrcc} {'' if minrank == 'NONE' else minrank} 完成表 ({usrdiff}{'' if only_val else '及以上'})"
+        if query_type == "cc":
+            query_title = f"{player_name} 的 {query_label} {'' if minrank == 'NONE' else minrank} 完成表 ({usrdiff}{'' if only_val else '及以上'})"
+        else:
+            query_title = f"{player_name} 的 {query_label} {'' if minrank == 'NONE' else minrank} 完成表 ({usrdiff}{'' if only_val else '及以上'})"
 
         await asyncio.to_thread(
             self.render_completion_image,
@@ -760,7 +887,12 @@ class Lauretta(Star):
         msgLines.append("/bind -- 绑定落雪账号。请先不带参数直接输入/bind得到授权链接")
         msgLines.append("/caj30 -- 生成中二节奏AJ30")
         msgLines.append("/csonglist -- 根据定数/等级查歌")
-        msgLines.append("/ccomplete -- 定数/等级进度表")
+        msgLines.append("/ccomplete -- 定数/等级/版本/分类进度表")
+        msgLines.append("  定数查询: /cc 14+  /cc 15.3  /cc 14  (默认显示所有难度)")
+        msgLines.append("  版本查询: /cc AMAZON  /cc chunithm  (默认仅显示MASTER及以上)")
+        msgLines.append("  分类查询: /cc ORIGINAL  /cc pops  (默认仅显示MASTER及以上)")
+        msgLines.append("  完整参数: /cc <query> [diff] [only=0] [minrank=NONE] [expbelow=0]")
+        msgLines.append("  expbelow=0 默认隐藏版本/分类查询中的EXPERT及以下难度")
 
         yield event.plain_result("\n".join(msgLines))
 
