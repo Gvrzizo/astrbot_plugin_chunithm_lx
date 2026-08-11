@@ -261,6 +261,28 @@ class Lauretta(Star):
         }
         return entry, satis_inc
 
+    MAX_SONGS_PER_PAGE = 200
+
+    def _split_cc_blocks(self, cc_blocks: list):
+        pages = []
+        song_tuples = []
+        for block in cc_blocks:
+            for song in block["songs"]:
+                song_tuples.append((block["cc"], song))
+
+        for i in range(0, len(song_tuples), self.MAX_SONGS_PER_PAGE):
+            chunk = song_tuples[i:i + self.MAX_SONGS_PER_PAGE]
+            page_blocks = {}
+            for cc, song in chunk:
+                if cc not in page_blocks:
+                    page_blocks[cc] = []
+                page_blocks[cc].append(song)
+            pages.append([
+                {"cc": cc, "songs": page_blocks[cc]}
+                for cc in sorted(page_blocks.keys(), key=float)
+            ])
+        return pages
+
     def _loadSongCache(self):
         """从本地文件加载歌曲列表"""
         if not self.songCacheFile.exists():
@@ -537,8 +559,9 @@ class Lauretta(Star):
 
         yield event.image_result(str(self.bestPath) + "/" + f"{event.get_sender_id()}_AJ30.png")
 
-    def render_cc_query_image(self, query_title: str, cc_blocks: list, out_path: str, sender_id: str):
+    def render_cc_query_image(self, query_title: str, cc_blocks: list, out_path: str, sender_id: str, page_num: int = 1, total_pages: int = 1):
         """渲染定数查歌结果图片（优化版）"""
+        songs_total = sum(len(b["songs"]) for b in cc_blocks)
 
         base_dir = self.storagePath
         env = Environment(loader=FileSystemLoader(base_dir), autoescape=True)
@@ -547,7 +570,7 @@ class Lauretta(Star):
         html = template.render(
             query_title=query_title,
             cc_blocks=cc_blocks,
-            total_songs=sum(len(b["songs"]) for b in cc_blocks)
+            total_songs=songs_total
         )
 
         width = 1600
@@ -558,20 +581,25 @@ class Lauretta(Star):
             rows += (songnum + songs_per_row - 1) // songs_per_row
         height = 350 + rows * 185 + len(cc_blocks) * 30
 
+        chrome_flags = ['--force-device-scale-factor=2']
+        if songs_total > 80:
+            chrome_flags.append('--disable-gpu')
+
         hti = Html2Image(
             output_path=out_path,
             size=(width, height),
-            custom_flags=['--force-device-scale-factor=2']
+            custom_flags=chrome_flags
         )
 
-        tmp_file = f"{sender_id}_CCQuery_tmp.png"
+        page_suffix = f"_p{page_num}" if total_pages > 1 else ""
+        tmp_file = f"{sender_id}_CCQuery_tmp{page_suffix}.png"
         hti.screenshot(
             html_str=html,
             save_as=tmp_file
         )
 
         tmp_path = Path(out_path) / tmp_file
-        final_path = Path(out_path) / f"{sender_id}_CCQuery.jpg"
+        final_path = Path(out_path) / f"{sender_id}_CCQuery{page_suffix}.jpg"
 
         img = Image.open(tmp_path)
         if img.mode in ('RGBA', 'LA', 'P'):
@@ -587,7 +615,7 @@ class Lauretta(Star):
 
         tmp_path.unlink(missing_ok=True)
 
-        file_size = final_path.stat().st_size / 1024 / 1024  # MB
+        file_size = final_path.stat().st_size / 1024 / 1024
         if file_size > 10:
             logger.warning(f"图片仍然过大: {file_size:.2f}MB，尝试进一步压缩")
             img = Image.open(final_path)
@@ -598,6 +626,7 @@ class Lauretta(Star):
                 optimize=True,
                 progressive=True
             )
+        return final_path
 
     @filter.command("csonglist", alias={"csl"})
     async def csonglist(self, event: AstrMessageEvent, usrcc: str):
@@ -633,21 +662,30 @@ class Lauretta(Star):
             yield event.plain_result("⚠️ 未找到对应定数的歌曲")
             return
 
-        query_title = f"定数查歌: {', '.join(b['cc'] for b in cc_blocks)}"
+        total_songs = sum(len(b["songs"]) for b in cc_blocks)
+        if total_songs > self.MAX_SONGS_PER_PAGE:
+            pages = self._split_cc_blocks(cc_blocks)
+        else:
+            pages = [cc_blocks]
 
-        await asyncio.to_thread(
-            self.render_cc_query_image,
-            query_title,
-            cc_blocks,
-            str(self.ccPath),
-            event.get_sender_id()
-        )
+        for i, page in enumerate(pages):
+            page_num = i + 1
+            total_pages = len(pages)
+            query_title = f"定数查歌: {', '.join(b['cc'] for b in cc_blocks)}"
+            if total_pages > 1:
+                query_title += f" ({page_num}/{total_pages})"
 
-        yield event.image_result(f"{self.ccPath}/{event.get_sender_id()}_CCQuery.jpg")
+            final_path = await asyncio.to_thread(
+                self.render_cc_query_image,
+                query_title, page, str(self.ccPath),
+                event.get_sender_id(), page_num, total_pages
+            )
+            yield event.image_result(str(final_path))
 
 
-    def render_completion_image(self, query_title: str, satis_cnt: int, is_conditional: bool, cc_blocks: list, out_path: str, sender_id: str):
+    def render_completion_image(self, query_title: str, satis_cnt: int, is_conditional: bool, cc_blocks: list, out_path: str, sender_id: str, page_num: int = 1, total_pages: int = 1):
         """渲染带有用户成绩的完成表图片"""
+        songs_total = sum(len(b["songs"]) for b in cc_blocks)
         base_dir = self.storagePath
         env = Environment(loader=FileSystemLoader(base_dir), autoescape=True)
         template = env.get_template("CCOMPLETE.html")
@@ -657,7 +695,7 @@ class Lauretta(Star):
             satis_cnt=satis_cnt,
             is_conditional=is_conditional,
             cc_blocks=cc_blocks,
-            total_songs=sum(len(b["songs"]) for b in cc_blocks)
+            total_songs=songs_total
         )
 
         width = 1600
@@ -668,20 +706,25 @@ class Lauretta(Star):
             rows += (songnum + songs_per_row - 1) // songs_per_row
         height = 350 + rows * 185 + len(cc_blocks) * 30
 
+        chrome_flags = ['--force-device-scale-factor=2']
+        if songs_total > 80:
+            chrome_flags.append('--disable-gpu')
+
         hti = Html2Image(
             output_path=out_path,
             size=(width, height),
-            custom_flags=['--force-device-scale-factor=2']
+            custom_flags=chrome_flags
         )
 
-        tmp_file = f"{sender_id}_Completion_tmp.png"
+        page_suffix = f"_p{page_num}" if total_pages > 1 else ""
+        tmp_file = f"{sender_id}_Completion_tmp{page_suffix}.png"
         hti.screenshot(
             html_str=html,
             save_as=tmp_file
         )
 
         tmp_path = Path(out_path) / tmp_file
-        final_path = Path(out_path) / f"{sender_id}_Completion.jpg"
+        final_path = Path(out_path) / f"{sender_id}_Completion{page_suffix}.jpg"
 
         img = Image.open(tmp_path)
         if img.mode in ('RGBA', 'LA', 'P'):
@@ -697,7 +740,7 @@ class Lauretta(Star):
 
         tmp_path.unlink(missing_ok=True)
 
-        file_size = final_path.stat().st_size / 1024 / 1024  # MB
+        file_size = final_path.stat().st_size / 1024 / 1024
         if file_size > 10:
             logger.warning(f"图片仍然过大: {file_size:.2f}MB，尝试进一步压缩")
             img = Image.open(final_path)
@@ -708,6 +751,7 @@ class Lauretta(Star):
                 optimize=True,
                 progressive=True
             )
+        return final_path
 
     @filter.command("ccomplete", alias={"cc", "ccpt"})
     async def ccomplete(self, event: AstrMessageEvent, usrcc: str, usrdiff: str = "BASIC", only: str = "0", minrank: str = "NONE", expbelow: str = "0"):
@@ -868,22 +912,37 @@ class Lauretta(Star):
             yield event.plain_result("⚠️ 未找到对应条件的歌曲")
             return
 
-        if query_type == "cc":
-            query_title = f"{player_name} 的 {query_label} {'' if minrank == 'NONE' else minrank} 完成表 ({usrdiff}{'' if only_val else '及以上'})"
+        rank_label = "" if minrank == "NONE" else f" {minrank}"
+        diff_label = f" ({usrdiff}{'' if only_val else '及以上'})"
+        base_title = f"{player_name} 的 {query_label}{rank_label} 完成表{diff_label}"
+
+        total_songs = sum(len(b["songs"]) for b in cc_blocks)
+        if total_songs > self.MAX_SONGS_PER_PAGE:
+            pages = self._split_cc_blocks(cc_blocks)
         else:
-            query_title = f"{player_name} 的 {query_label} {'' if minrank == 'NONE' else minrank} 完成表 ({usrdiff}{'' if only_val else '及以上'})"
+            pages = [cc_blocks]
 
-        await asyncio.to_thread(
-            self.render_completion_image,
-            query_title,
-            satis_cnt,
-            is_conditional,
-            cc_blocks,
-            str(self.ccPath),
-            event.get_sender_id()
-        )
+        for i, page in enumerate(pages):
+            page_num = i + 1
+            total_pages = len(pages)
+            query_title = base_title
+            if total_pages > 1:
+                query_title += f" ({page_num}/{total_pages})"
 
-        yield event.image_result(f"{self.ccPath}/{event.get_sender_id()}_Completion.jpg")
+            page_satis = sum(1 for b in page for s in b["songs"] if s.get("show_check"))
+
+            final_path = await asyncio.to_thread(
+                self.render_completion_image,
+                query_title,
+                page_satis,
+                is_conditional,
+                page,
+                str(self.ccPath),
+                event.get_sender_id(),
+                page_num,
+                total_pages,
+            )
+            yield event.image_result(str(final_path))
 
     @filter.command("help")
     async def help(self, event: AstrMessageEvent):
