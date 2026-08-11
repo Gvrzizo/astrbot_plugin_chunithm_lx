@@ -61,12 +61,22 @@ class TokenManager:
             )
 
             res_json = resp.json()
-            if resp.status_code != 200 or not res_json.get("success"):
-                return None
 
-            token_data = res_json["data"]
-            self._save(qq_id, token_data["access_token"], token_data["refresh_token"], token_data["expires_in"])
-            return token_data["access_token"]
+            # 新格式：令牌字段位于响应顶层（OAuth 2.0 标准）
+            access_token = res_json.get("access_token")
+            if access_token:
+                self._save(qq_id, access_token, res_json.get("refresh_token", ""), res_json.get("expires_in", 0))
+                return access_token
+
+            # 旧格式兼容：令牌字段包裹在 data 内
+            if res_json.get("success"):
+                token_data = res_json.get("data", {})
+                access_token = token_data.get("access_token")
+                if access_token:
+                    self._save(qq_id, access_token, token_data.get("refresh_token", ""), token_data.get("expires_in", 0))
+                    return access_token
+
+            return None
         except Exception:
             return None
 
@@ -87,12 +97,22 @@ class TokenManager:
             )
 
             res_json = resp.json()
-            if resp.status_code != 200 or not res_json.get("success"):
-                return False
 
-            token_data = res_json["data"]
-            self._save(qq_id, token_data["access_token"], token_data["refresh_token"], token_data["expires_in"])
-            return True
+            # 新格式：令牌字段位于响应顶层（OAuth 2.0 标准）
+            access_token = res_json.get("access_token")
+            if access_token:
+                self._save(qq_id, access_token, res_json.get("refresh_token", ""), res_json.get("expires_in", 0))
+                return True
+
+            # 旧格式兼容：令牌字段包裹在 data 内
+            if res_json.get("success"):
+                token_data = res_json.get("data", {})
+                access_token = token_data.get("access_token")
+                if access_token:
+                    self._save(qq_id, access_token, token_data.get("refresh_token", ""), token_data.get("expires_in", 0))
+                    return True
+
+            return False
         except Exception:
             return False
 
