@@ -505,17 +505,19 @@ class Lauretta(Star):
         ajRecords = []
         for item in scoreList:
             if item.get("full_combo") == "alljustice" or item.get("full_combo") == "alljusticecritical":
-                ajRecords.append({
-                    "song_id": item.get("id", "0"),
-                    "song_name": item.get("song_name", "未知曲目"),
-                    "level": self.diffiMap[item.get("level_index", 0)] + " " + item.get("level", "?"),
-                    "level_index": item.get("level_index", 0),
-                    "cc": self.songMap[item.get("id", 0)].get("difficulties", [])[item.get("level_index", 0)].get("level_value", 0),
-                    "score": item.get("score", 0),
-                    "rank": self.rankMap[item.get("rank", "sssp")],
-                    "justiceCount": self.calcJusticeNumber(item.get("id", 0), item.get("level_index", 0), item.get("score", 0)),
-                    "rating": item.get("rating", 0),
-                })
+                tmpid = item.get("id", 0)
+                if tmpid and tmpid in self.songMap:
+                    ajRecords.append({
+                        "song_id": item.get("id", "0"),
+                        "song_name": item.get("song_name", "未知曲目"),
+                        "level": self.diffiMap[item.get("level_index", 0)] + " " + item.get("level", "?"),
+                        "level_index": item.get("level_index", 0),
+                        "cc": self.songMap[item.get("id", 0)].get("difficulties", [])[item.get("level_index", 0)].get("level_value", 0),
+                        "score": item.get("score", 0),
+                        "rank": self.rankMap[item.get("rank", "sssp")],
+                        "justiceCount": self.calcJusticeNumber(item.get("id", 0), item.get("level_index", 0), item.get("score", 0)),
+                        "rating": item.get("rating", 0),
+                    })
 
         if not ajRecords:
             yield event.plain_result("⚠️ 暂无 AJ 成绩记录")
