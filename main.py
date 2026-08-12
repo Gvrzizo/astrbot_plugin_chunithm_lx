@@ -12,7 +12,7 @@ from html2image import Html2Image
 from PIL import Image
 from .TokenManager import TokenManager
 
-@register("chunithm_lx", "Lauretta", "中二节奏机器人", "0.2.1")
+@register("chunithm_lx", "Lauretta", "中二节奏机器人", "0.2.2")
 class Lauretta(Star):
     def __init__(self, context: Context):
         super().__init__(context)
