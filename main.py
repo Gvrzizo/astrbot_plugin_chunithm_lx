@@ -10,13 +10,15 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 from html2image import Html2Image
 from PIL import Image
-from .TokenManager import TokenManager
+from .TokenManager import TokenManager, RefreshTokenExpiredError
 
 import urllib3.util.connection
 urllib3.util.connection.HAS_IPV6 = False
 
 @register("chunithm_lx", "Lauretta", "中二节奏机器人", "0.2.2")
 class Lauretta(Star):
+    TOKEN_REFRESH_INTERVAL = 7 * 24 * 3600
+
     def __init__(self, context: Context):
         super().__init__(context)
 
@@ -103,6 +105,7 @@ class Lauretta(Star):
         self.genre_by_name = {}
         self.songs_by_version = {}
         self.songs_by_genre = {}
+        self._refresh_task = None
         self._loadSongCache()
         self._build_meta_maps()
 
@@ -367,12 +370,27 @@ class Lauretta(Star):
         """插件初始化时自动调用"""
         if not self.songList:
             await self.loadSongFromApi()
+        # 启动令牌自动续期后台任务
+        if self._refresh_task is None or self._refresh_task.done():
+            self._refresh_task = asyncio.create_task(self._token_refresh_loop())
+
+    async def _token_refresh_loop(self):
+        """后台循环：定期刷新所有用户的令牌，避免刷新令牌因长期未用而过期"""
+        while True:
+            try:
+                await self.tm.refresh_all_tokens()
+            except Exception as e:
+                logger.error(f"令牌自动续期失败: {e}")
+            await asyncio.sleep(self.TOKEN_REFRESH_INTERVAL)
 
     @filter.command("bind")
     async def bind(self, event: AstrMessageEvent, code: str = ""):
         """OAuth绑定"""
         qqid = event.get_sender_id()
-        testbind = await self.tm.get_valid_token(qqid)
+        try:
+            testbind = await self.tm.get_valid_token(qqid)
+        except RefreshTokenExpiredError:
+            testbind = None
         if testbind:
             try:
                 headers = {"Authorization": f"Bearer {testbind}"}
@@ -483,13 +501,17 @@ class Lauretta(Star):
         """查询自己的 AJ30"""
         qqid = event.get_sender_id()
 
-        access_token = await self.tm.get_valid_token(qqid)
+        try:
+            access_token = await self.tm.get_valid_token(qqid)
+        except RefreshTokenExpiredError:
+            yield event.plain_result("❌ 你的授权因长期未使用已过期，请使用 /bind 重新绑定。")
+            return
 
         print("Finished fetching user access token for aj30")
 
         if not access_token:
             yield event.plain_result(
-                "❌ 你还未绑定或授权已过期，请使用 /bind 重新绑定。"
+                "❌ 你还未绑定，请使用 /bind 绑定。"
             )
             return
 
@@ -818,9 +840,14 @@ class Lauretta(Star):
         else:
             diffiList = [i for i in range(minDiffi, 6)]
 
-        access_token = await self.tm.get_valid_token(qqid)
+        try:
+            access_token = await self.tm.get_valid_token(qqid)
+        except RefreshTokenExpiredError:
+            yield event.plain_result("❌ 你的授权因长期未使用已过期，请使用 /bind 重新绑定。")
+            return
+
         if not access_token:
-            yield event.plain_result("❌ 你还未绑定或授权已过期，请使用 /bind 重新绑定。")
+            yield event.plain_result("❌ 你还未绑定，请使用 /bind 绑定。")
             return
 
         yield event.plain_result(f"收到，请稍等~")
@@ -989,3 +1016,6 @@ class Lauretta(Star):
 
     async def terminate(self):
         """插件卸载时调用"""
+        if self._refresh_task is not None:
+            self._refresh_task.cancel()
+            self._refresh_task = None
