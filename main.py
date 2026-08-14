@@ -482,11 +482,15 @@ class Lauretta(Star):
 
         access_token = await self.tm.get_valid_token(qqid)
 
+        print("Finished fetching user access token for aj30")
+
         if not access_token:
             yield event.plain_result(
                 "❌ 你还未绑定或授权已过期，请使用 /bind 重新绑定。"
             )
             return
+
+        yield event.plain_result(f"收到，请稍等~")
 
         headers = {"Authorization": f"Bearer {access_token}"}
         try:
@@ -500,6 +504,8 @@ class Lauretta(Star):
         if not scoredata.get("success"):
             yield event.plain_result(f"❌ API返回错误: {scoredata.get('message')}")
             return
+
+        print("Finished fetching score data for aj30")
 
         scoreList = scoredata.get("data", [])
         ajRecords = []
@@ -549,7 +555,7 @@ class Lauretta(Star):
             msgLines.append(f"{idx}. {song} [{level} ({cc})] {score} {justiceCount}小AJ Rating: {rating:.2f}")
         msgLines.append(f" 你的AJ30为 {(totRat / 30):.2f} ")
 
-        print("Finished fetching data")
+        print("Finished aj data processing")
 
         await asyncio.to_thread(
             self.render_aj30_image,
@@ -814,6 +820,8 @@ class Lauretta(Star):
             yield event.plain_result("❌ 你还未绑定或授权已过期，请使用 /bind 重新绑定。")
             return
 
+        yield event.plain_result(f"收到，请稍等~")
+
         headers = {"Authorization": f"Bearer {access_token}"}
         try:
             response = await asyncio.to_thread(requests.get, self.scoresUrl, headers=headers)
@@ -840,6 +848,8 @@ class Lauretta(Star):
             player_name = p_res.json().get("data", {}).get("name", "CHUNITHM")
         except Exception:
             player_name = "CHUNITHM"
+
+        print("Finished completion data fetching")
 
         rank_order = {"D": 1, "C": 2, "B": 3, "BB": 4, "BBB": 5, "A": 6, "AA": 7, "AAA": 8,
                       "S": 9, "SP": 10, "SS": 11, "SSP": 12, "SSS": 13, "SSSP": 14}
@@ -925,6 +935,8 @@ class Lauretta(Star):
             pages = self._split_cc_blocks(cc_blocks)
         else:
             pages = [cc_blocks]
+
+        print("Finished completion data processing")
 
         for i, page in enumerate(pages):
             page_num = i + 1
