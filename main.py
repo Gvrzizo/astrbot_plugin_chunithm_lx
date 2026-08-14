@@ -549,6 +549,8 @@ class Lauretta(Star):
             msgLines.append(f"{idx}. {song} [{level} ({cc})] {score} {justiceCount}小AJ Rating: {rating:.2f}")
         msgLines.append(f" 你的AJ30为 {(totRat / 30):.2f} ")
 
+        print("Finished fetching data")
+
         await asyncio.to_thread(
             self.render_aj30_image,
             playerdata.get("name", "CHUNITHM"),
