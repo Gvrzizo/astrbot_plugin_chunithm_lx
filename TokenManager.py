@@ -2,12 +2,10 @@ import sqlite3
 import time
 import requests
 import asyncio
-import logging
+from astrbot.api import logger
 
 import urllib3.util.connection
 urllib3.util.connection.HAS_IPV6 = False
-
-logger = logging.getLogger(__name__)
 
 
 class RefreshTokenExpiredError(Exception):
