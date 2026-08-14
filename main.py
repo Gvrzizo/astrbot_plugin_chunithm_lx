@@ -12,6 +12,9 @@ from html2image import Html2Image
 from PIL import Image
 from .TokenManager import TokenManager
 
+import urllib3.util.connection
+urllib3.util.connection.HAS_IPV6 = False
+
 @register("chunithm_lx", "Lauretta", "中二节奏机器人", "0.2.2")
 class Lauretta(Star):
     def __init__(self, context: Context):
@@ -334,7 +337,7 @@ class Lauretta(Star):
     async def loadSongFromApi(self):
         """从 API 获取歌曲列表"""
         try:
-            response = await asyncio.to_thread(requests.get, self.songListUrl, params={"notes": "true"})
+            response = await asyncio.to_thread(requests.get, self.songListUrl, params={"notes": "true"}, timeout=30)
             response.raise_for_status()
             data = response.json()
             self.versions = data.get("versions", [])
@@ -373,7 +376,7 @@ class Lauretta(Star):
         if testbind:
             try:
                 headers = {"Authorization": f"Bearer {testbind}"}
-                response = await asyncio.to_thread(requests.get, self.playerInfoUrl, headers=headers)
+                response = await asyncio.to_thread(requests.get, self.playerInfoUrl, headers=headers, timeout=30)
                 response.raise_for_status()
                 usrdata = response.json()
                 name = usrdata.get("data", {}).get("name", "未知用户")
@@ -404,7 +407,7 @@ class Lauretta(Star):
 
         headers = {"Authorization": f"Bearer {access_token}"}
         try:
-            response = await asyncio.to_thread(requests.get, self.playerInfoUrl, headers=headers)
+            response = await asyncio.to_thread(requests.get, self.playerInfoUrl, headers=headers, timeout=30)
             response.raise_for_status()
             usrdata = response.json()
             if usrdata.get("success"):
@@ -494,7 +497,7 @@ class Lauretta(Star):
 
         headers = {"Authorization": f"Bearer {access_token}"}
         try:
-            response = await asyncio.to_thread(requests.get, self.scoresUrl, headers=headers)
+            response = await asyncio.to_thread(requests.get, self.scoresUrl, headers=headers, timeout=30)
             response.raise_for_status()
             scoredata = response.json()
         except Exception as e:
@@ -535,7 +538,7 @@ class Lauretta(Star):
         await self._ensure_jackets(top30)
 
         try:
-            response = await asyncio.to_thread(requests.get, self.playerInfoUrl, headers=headers)
+            response = await asyncio.to_thread(requests.get, self.playerInfoUrl, headers=headers, timeout=30)
             response.raise_for_status()
             playerdata = response.json().get("data", {})
         except Exception as e:
@@ -824,7 +827,7 @@ class Lauretta(Star):
 
         headers = {"Authorization": f"Bearer {access_token}"}
         try:
-            response = await asyncio.to_thread(requests.get, self.scoresUrl, headers=headers)
+            response = await asyncio.to_thread(requests.get, self.scoresUrl, headers=headers, timeout=30)
             response.raise_for_status()
             scoredata = response.json()
         except Exception as e:
@@ -843,7 +846,7 @@ class Lauretta(Star):
                 user_scores_map[f"{sid}_{l_idx}"] = item
 
         try:
-            p_res = await asyncio.to_thread(requests.get, self.playerInfoUrl, headers=headers)
+            p_res = await asyncio.to_thread(requests.get, self.playerInfoUrl, headers=headers, timeout=30)
             p_res.raise_for_status()
             player_name = p_res.json().get("data", {}).get("name", "CHUNITHM")
         except Exception:

@@ -3,6 +3,9 @@ import time
 import requests
 import asyncio
 
+import urllib3.util.connection
+urllib3.util.connection.HAS_IPV6 = False
+
 class TokenManager:
     def __init__(self, db_path: str, client_id: str, client_secret: str):
         self.db_path = db_path
