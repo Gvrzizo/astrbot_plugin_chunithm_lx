@@ -490,7 +490,7 @@ class Lauretta(Star):
             records = top30,
             aj30_avg = aj30_avg,
         )
-        hti = Html2Image(output_path = out_path, size = (1800, 1075), custom_flags=['--force-device-scale-factor=4'])
+        hti = Html2Image(output_path = out_path, size = (1800, 1075), custom_flags=['--force-device-scale-factor=4', '--no-sandbox'])
         hti.screenshot(
             html_str=html,
             save_as=f"{sender_id}_AJ30.png",
@@ -616,7 +616,7 @@ class Lauretta(Star):
             rows += (songnum + songs_per_row - 1) // songs_per_row
         height = 350 + rows * 185 + len(cc_blocks) * 30
 
-        chrome_flags = ['--force-device-scale-factor=2']
+        chrome_flags = ['--force-device-scale-factor=2', '--no-sandbox']
         if songs_total > 80:
             chrome_flags.append('--disable-gpu')
 
@@ -741,7 +741,7 @@ class Lauretta(Star):
             rows += (songnum + songs_per_row - 1) // songs_per_row
         height = 350 + rows * 185 + len(cc_blocks) * 30
 
-        chrome_flags = ['--force-device-scale-factor=2']
+        chrome_flags = ['--force-device-scale-factor=2', '--no-sandbox']
         if songs_total > 80:
             chrome_flags.append('--disable-gpu')
 
