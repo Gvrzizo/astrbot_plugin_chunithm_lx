@@ -490,7 +490,7 @@ class Lauretta(Star):
             records = top30,
             aj30_avg = aj30_avg,
         )
-        hti = Html2Image(output_path = out_path, size = (1800, 1075), custom_flags=['--force-device-scale-factor=4', '--no-sandbox'])
+        hti = Html2Image(output_path = out_path, size = (1800, 1075), custom_flags=['--force-device-scale-factor=2', '--no-sandbox'])
         hti.screenshot(
             html_str=html,
             save_as=f"{sender_id}_AJ30.png",
