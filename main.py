@@ -2,10 +2,12 @@ from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
+from astrbot.core.star.filter.command import GreedyStr
 
 import requests
 import json
 import asyncio
+import re
 from datetime import datetime
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
@@ -105,19 +107,9 @@ class Lauretta(Star):
             "fullcombo": ("fc", "FC"),
             "alljusticecritical": ("ajc", "AJC")
         }
-        self.ccs = []
+        # 定数索引。键完全由歌曲数据决定，不预设上限，因此游戏以后新增
+        # 15.8 / 16.0 之类的定数时会自动适配。
         self.ccMap = {}
-        tmpi = 0
-        while tmpi <= 157:
-            curcc = str(round(tmpi / 10.0, 1))
-            self.ccMap[curcc] = []
-            self.ccs.append(curcc)
-            if tmpi <= 60:
-                tmpi += 10
-            elif tmpi <= 95:
-                tmpi += 5
-            else:
-                tmpi += 1
 
         self.songList = []
         self.songMap = {}
@@ -173,58 +165,166 @@ class Lauretta(Star):
         for lst in self.songs_by_genre.values():
             lst.sort(key=lambda x: x[1])
 
+    @staticmethod
+    def _cc_decimals(base: int):
+        """返回某个整数定数下、除 .0 以外的合法小数位。
+
+        规则：1.0~6.0 只有 .0；7.0~9.5 每 0.5；10.0 起每 0.1。
+        """
+        if base <= 6:
+            return []
+        if base <= 9:
+            return [5]
+        return list(range(1, 10))
+
     def _parse_cc(self, usrcc: str):
-        """解析 CC 字符串，返回目标定数列表（可能为空）"""
-        tarccs = []
-        if usrcc in self.ccs:
-            tarccs.append(usrcc)
-        elif usrcc.endswith("+"):
-            baseStr = usrcc[:-1]
-            if baseStr.isdigit():
-                baseVal = int(baseStr)
-                if 7 <= baseVal <= 9:
-                    tarccs.append(f"{baseVal}.5")
-                elif 10 <= baseVal <= 14:
-                    for dec in range(5, 10):
-                        tarccs.append(f"{baseVal}.{dec}")
-                elif baseVal == 15:
-                    for dec in range(5, 8):
-                        tarccs.append(f"{baseVal}.{dec}")
-        elif usrcc.isdigit():
-            baseVal = int(usrcc)
-            if 1 <= baseVal <= 6:
-                tarccs.append(f"{baseVal}.0")
-            elif 7 <= baseVal <= 9:
-                tarccs.append(f"{baseVal}.0")
-                tarccs.append(f"{baseVal}.5")
-            elif 10 <= baseVal <= 15:
-                for dec in range(0, 5):
-                    tarccs.append(f"{baseVal}.{dec}")
-        return tarccs
+        """解析定数字符串，返回目标定数列表（可能为空）。
+
+        支持三种写法，且不预设定数上限：
+        - 具体定数：``15.3`` / ``9.5``
+        - 整数：``14``（1~6 取 .0；7~9 取 .0/.5；10+ 取 .0~.4）
+        - 加号：``14+``（7~9 取 .5；10+ 取 .5~.9）
+        """
+        usrcc = usrcc.strip()
+        if not usrcc:
+            return []
+
+        match = re.fullmatch(r"(\d+)\.(\d+)", usrcc)
+        if match:
+            base, dec = int(match.group(1)), int(match.group(2))
+            if base >= 1 and dec in [0, *self._cc_decimals(base)]:
+                return [f"{base}.{dec}"]
+            return []
+
+        match = re.fullmatch(r"(\d+)\+", usrcc)
+        if match:
+            base = int(match.group(1))
+            if 7 <= base <= 9:
+                return [f"{base}.5"]
+            if base >= 10:
+                return [f"{base}.{dec}" for dec in range(5, 10)]
+            return []
+
+        if usrcc.isdigit():
+            base = int(usrcc)
+            if 1 <= base <= 6:
+                return [f"{base}.0"]
+            if 7 <= base <= 9:
+                return [f"{base}.0", f"{base}.5"]
+            if base >= 10:
+                return [f"{base}.{dec}" for dec in range(0, 5)]
+        return []
+
+    def _match_version(self, query: str):
+        """匹配版本名，先精确匹配，再取最短的子串匹配（即最具体的版本）。"""
+        query = query.lower().strip()
+        if not query:
+            return None
+        if query in self.version_by_title:
+            return self.version_by_title[query]
+
+        matches = [
+            (title, ver_val)
+            for title, ver_val in self.version_by_title.items()
+            if query in title
+        ]
+        if not matches:
+            return None
+        matches.sort(key=lambda item: (len(item[0]), item[0]))
+        return matches[0][1]
+
+    def _match_genre(self, query: str):
+        """匹配分类名，先精确匹配，再取最短的子串匹配。"""
+        query = query.lower().strip()
+        if not query:
+            return None
+        if query in self.genre_by_name:
+            return self.genre_by_name[query]
+
+        matches = [
+            (name_lower, name)
+            for name_lower, name in self.genre_by_name.items()
+            if query in name_lower
+        ]
+        if not matches:
+            return None
+        matches.sort(key=lambda item: len(item[0]))
+        return matches[0][1]
 
     def _detect_query_type(self, usrcc: str):
         """检测查询类型，返回 ("cc", tarccs) / ("version", ver_val) / ("genre", name) / (None, None)"""
+        usrcc = usrcc.strip()
         tarccs = self._parse_cc(usrcc)
         if tarccs:
             return "cc", tarccs
 
-        usrcc_lower = usrcc.lower().strip()
+        ver_val = self._match_version(usrcc)
+        if ver_val is not None:
+            return "version", ver_val
 
-        for title, ver_val in self.version_by_title.items():
-            if title == usrcc_lower:
-                return "version", ver_val
-        for title, ver_val in self.version_by_title.items():
-            if usrcc_lower in title:
-                return "version", ver_val
-
-        for name_lower, name in self.genre_by_name.items():
-            if name_lower == usrcc_lower:
-                return "genre", name
-        for name_lower, name in self.genre_by_name.items():
-            if usrcc_lower in name_lower:
-                return "genre", name
+        genre = self._match_genre(usrcc)
+        if genre is not None:
+            return "genre", genre
 
         return None, None
+
+    def _split_ccomplete_args(self, raw: str):
+        """解析 /cc 的整串参数，返回 (query, usrdiff, only, minrank, expbelow)。
+
+        查询词允许包含空格（例如 ``crystal plus``、``流行 & 动漫``），因此不再依赖
+        框架按空格切分：这里从头累积查询词，遇到难度关键字（含 ``world's end``）
+        之后的部分才按选项处理。选项同时兼容两种写法：
+
+        - 位置写法：``/cc 14+ MASTER 1 SSS 0``
+        - 显式写法：``/cc crystal plus diff=MASTER only=0 minrank=SSS expbelow=0``
+        """
+        tokens = raw.split()
+
+        options_kv = {}
+        positional = []
+        for token in tokens:
+            if "=" in token:
+                key, _, value = token.partition("=")
+                options_kv[key.strip().lower()] = value.strip()
+            else:
+                positional.append(token)
+
+        # 合并 "world's end" 这种带空格的难度名
+        merged = []
+        idx = 0
+        while idx < len(positional):
+            if (
+                positional[idx].lower() == "world's"
+                and idx + 1 < len(positional)
+                and positional[idx + 1].lower() == "end"
+            ):
+                merged.append("WORLD'S END")
+                idx += 2
+            else:
+                merged.append(positional[idx])
+                idx += 1
+
+        diff_names = {name.lower() for name in self.diffiInverted}
+        split_at = len(merged)
+        for idx, token in enumerate(merged):
+            if token.lower() in diff_names:
+                split_at = idx
+                break
+
+        query = " ".join(merged[:split_at]).strip()
+        options = merged[split_at:]
+
+        usrdiff = options[0] if len(options) >= 1 else "BASIC"
+        only = options[1] if len(options) >= 2 else "0"
+        minrank = options[2] if len(options) >= 3 else "NONE"
+        expbelow = options[3] if len(options) >= 4 else "0"
+
+        usrdiff = options_kv.get("diff", options_kv.get("difficulty", usrdiff))
+        only = options_kv.get("only", only)
+        minrank = options_kv.get("minrank", options_kv.get("rank", minrank))
+        expbelow = options_kv.get("expbelow", expbelow)
+
+        return query, usrdiff, only, minrank, expbelow
 
     def _build_song_entry(self, song_id, diffi, user_scores_map, rank_order, target_rank, is_conditional):
         satis_inc = 0
@@ -322,8 +422,7 @@ class Lauretta(Star):
         self.songMap = {}
         self.versions = []
         self.genres = []
-        for key in self.ccMap:
-            self.ccMap[key] = []
+        self.ccMap = {}
         self.version_by_title = {}
         self.version_by_value = {}
         self.genre_by_name = {}
@@ -358,7 +457,7 @@ class Lauretta(Star):
                 oricc = k.get("level_value", 0)
                 diffi = k.get("difficulty", 0)
                 cc = str(round(float(oricc), 1))
-                self.ccMap[cc].append([isongid, diffi])
+                self.ccMap.setdefault(cc, []).append([isongid, diffi])
         for i in self.ccMap.values():
             i.sort(key = lambda x: x[1])
         logger.info(f"已从缓存加载 {len(self.songList)} 首歌曲, {len(self.versions)} 个版本, {len(self.genres)} 个分类")
@@ -403,7 +502,7 @@ class Lauretta(Star):
                 oricc = k.get("level_value", 0)
                 diffi = k.get("difficulty", 0)
                 cc = str(round(float(oricc), 1))
-                self.ccMap[cc].append([isongid, diffi])
+                self.ccMap.setdefault(cc, []).append([isongid, diffi])
         self._saveSongCache(songs)
         self._build_meta_maps()
         for i in self.ccMap.values():
@@ -844,9 +943,10 @@ class Lauretta(Star):
         return final_path
 
     @filter.command("ccomplete", alias={"cc", "ccpt"})
-    async def ccomplete(self, event: AstrMessageEvent, usrcc: str, usrdiff: str = "BASIC", only: str = "0", minrank: str = "NONE", expbelow: str = "0"):
+    async def ccomplete(self, event: AstrMessageEvent, args: GreedyStr):
         """查询某定数/等级/版本/分类的个人成绩完成表"""
         qqid = event.get_sender_id()
+        usrcc, usrdiff, only, minrank, expbelow = self._split_ccomplete_args(str(args))
         usrcc = usrcc.strip()
         minrank = minrank.strip().upper()
 
@@ -1099,9 +1199,10 @@ class Lauretta(Star):
         msgLines.append("/csonglist -- 根据定数/等级查歌")
         msgLines.append("/ccomplete -- 定数/等级/版本/分类进度表")
         msgLines.append("  定数查询: /cc 14+  /cc 15.3  /cc 14  (默认显示所有难度)")
-        msgLines.append("  版本查询: /cc AMAZON  /cc chunithm  (默认仅显示MASTER及以上)")
-        msgLines.append("  分类查询: /cc ORIGINAL  /cc pops  (默认仅显示MASTER及以上)")
-        msgLines.append("  完整参数: /cc <query> [diff] [only=0] [minrank=NONE] [expbelow=0]")
+        msgLines.append("  版本查询: /cc AMAZON  /cc crystal plus  (默认仅显示MASTER及以上)")
+        msgLines.append("  分类查询: /cc 原创  /cc 流行 & 动漫  (默认仅显示MASTER及以上)")
+        msgLines.append("  完整参数: /cc <查询词(可含空格)> [难度] [only] [minrank] [expbelow]")
+        msgLines.append("  也可显式指定: /cc crystal plus diff=MASTER only=1 minrank=SSS expbelow=0")
         msgLines.append("  expbelow=0 默认隐藏版本/分类查询中的EXPERT及以下难度")
         if event.is_admin():
             msgLines.append("")
