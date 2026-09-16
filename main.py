@@ -267,7 +267,11 @@ class Lauretta(Star):
         }
         return entry, satis_inc
 
-    MAX_SONGS_PER_PAGE = 200
+    MAX_SONGS_PER_PAGE = 100
+
+    # 单张图片的目标上限（MB）。服务器上行带宽有限，过大的图片会导致 QQ 接口
+    # 上传失败（日志里表现为 API 返回 null），因此保存时统一压缩到此大小以内。
+    MAX_IMAGE_SIZE_MB = 4.0
 
     def _split_cc_blocks(self, cc_blocks: list):
         pages = []
@@ -479,6 +483,49 @@ class Lauretta(Star):
             else:
                 rec["jacket_url"] = ""
 
+    def _save_jpeg_within_limit(self, img: Image.Image, final_path: Path, max_mb: float | None = None) -> Path:
+        """将 PIL 图片保存为 JPEG，并逐级压缩到目标大小以内。
+
+        服务器上行带宽有限，过大的图片会导致 QQ 接口上传失败（日志里表现为
+        API 返回 null）。这里优先降低 JPEG 质量，仍超标时再逐步缩小分辨率，
+        尽量把最终文件压到 ``max_mb`` 之内。
+        """
+        max_mb = self.MAX_IMAGE_SIZE_MB if max_mb is None else max_mb
+        if img.mode in ("RGBA", "LA", "P"):
+            img = img.convert("RGB")
+
+        quality = 85
+        scale = 1.0
+        while True:
+            target = img
+            if scale < 1.0:
+                target = img.resize(
+                    (max(1, int(img.width * scale)), max(1, int(img.height * scale))),
+                    Image.Resampling.LANCZOS,
+                )
+            target.save(
+                final_path,
+                format="JPEG",
+                quality=quality,
+                optimize=True,
+                progressive=True,
+            )
+            size_mb = final_path.stat().st_size / 1024 / 1024
+            if size_mb <= max_mb:
+                logger.info(
+                    f"图片已保存: {final_path.name} ({size_mb:.2f}MB, quality={quality}, scale={scale:.2f})"
+                )
+                return final_path
+            if quality > 50:
+                quality = max(50, quality - 10)
+            elif scale > 0.5:
+                scale = max(0.5, scale * 0.8)
+            else:
+                logger.warning(
+                    f"图片压缩后仍有 {size_mb:.2f}MB (>{max_mb}MB)，可能无法发送: {final_path.name}"
+                )
+                return final_path
+
     def render_aj30_image(self, player_name: str, player_rating: float, top30: list, aj30_avg: float, out_path: str, sender_id: str):
         base_dir = self.storagePath
         env = Environment(loader=FileSystemLoader(base_dir), autoescape=True)
@@ -491,10 +538,17 @@ class Lauretta(Star):
             aj30_avg = aj30_avg,
         )
         hti = Html2Image(output_path = out_path, size = (1800, 1075), custom_flags=['--force-device-scale-factor=2', '--no-sandbox'])
+        tmp_file = f"{sender_id}_AJ30_tmp.png"
         hti.screenshot(
             html_str=html,
-            save_as=f"{sender_id}_AJ30.png",
+            save_as=tmp_file,
         )
+
+        tmp_path = Path(out_path) / tmp_file
+        final_path = Path(out_path) / f"{sender_id}_AJ30.jpg"
+        self._save_jpeg_within_limit(Image.open(tmp_path), final_path)
+        tmp_path.unlink(missing_ok=True)
+        return final_path
 
     @filter.command("caj30")
     async def caj30(self, event: AstrMessageEvent):
@@ -582,7 +636,7 @@ class Lauretta(Star):
 
         print("Finished aj data processing")
 
-        await asyncio.to_thread(
+        final_path = await asyncio.to_thread(
             self.render_aj30_image,
             playerdata.get("name", "CHUNITHM"),
             playerdata.get("rating", 0.00),
@@ -592,7 +646,8 @@ class Lauretta(Star):
             event.get_sender_id()
         )
 
-        yield event.image_result(str(self.bestPath) + "/" + f"{event.get_sender_id()}_AJ30.png")
+        yield event.plain_result("您的 AJ30 结果如下：")
+        yield event.image_result(str(final_path))
 
     def render_cc_query_image(self, query_title: str, cc_blocks: list, out_path: str, sender_id: str, page_num: int = 1, total_pages: int = 1):
         """渲染定数查歌结果图片（优化版）"""
@@ -636,31 +691,8 @@ class Lauretta(Star):
         tmp_path = Path(out_path) / tmp_file
         final_path = Path(out_path) / f"{sender_id}_CCQuery{page_suffix}.jpg"
 
-        img = Image.open(tmp_path)
-        if img.mode in ('RGBA', 'LA', 'P'):
-            img = img.convert('RGB')
-
-        img.save(
-            final_path,
-            format='JPEG',
-            quality=85,
-            optimize=True,
-            progressive=True
-        )
-
+        self._save_jpeg_within_limit(Image.open(tmp_path), final_path)
         tmp_path.unlink(missing_ok=True)
-
-        file_size = final_path.stat().st_size / 1024 / 1024
-        if file_size > 10:
-            logger.warning(f"图片仍然过大: {file_size:.2f}MB，尝试进一步压缩")
-            img = Image.open(final_path)
-            img.save(
-                final_path,
-                format='JPEG',
-                quality=75,
-                optimize=True,
-                progressive=True
-            )
         return final_path
 
     @filter.command("csonglist", alias={"csl"})
@@ -761,31 +793,8 @@ class Lauretta(Star):
         tmp_path = Path(out_path) / tmp_file
         final_path = Path(out_path) / f"{sender_id}_Completion{page_suffix}.jpg"
 
-        img = Image.open(tmp_path)
-        if img.mode in ('RGBA', 'LA', 'P'):
-            img = img.convert('RGB')
-
-        img.save(
-            final_path,
-            format='JPEG',
-            quality=85,
-            optimize=True,
-            progressive=True
-        )
-
+        self._save_jpeg_within_limit(Image.open(tmp_path), final_path)
         tmp_path.unlink(missing_ok=True)
-
-        file_size = final_path.stat().st_size / 1024 / 1024
-        if file_size > 10:
-            logger.warning(f"图片仍然过大: {file_size:.2f}MB，尝试进一步压缩")
-            img = Image.open(final_path)
-            img.save(
-                final_path,
-                format='JPEG',
-                quality=75,
-                optimize=True,
-                progressive=True
-            )
         return final_path
 
     @filter.command("ccomplete", alias={"cc", "ccpt"})
