@@ -704,6 +704,8 @@ class Lauretta(Star):
             yield event.plain_result("❌ 请输入合法的定数或等级！\n示例：\n/csonglist 14+\n/csonglist 15.3")
             return
 
+        yield event.plain_result("收到，请稍等~")
+
         cc_blocks = []
         for curcc in tarccs:
             songs_data = []
@@ -734,6 +736,9 @@ class Lauretta(Star):
             pages = self._split_cc_blocks(cc_blocks)
         else:
             pages = [cc_blocks]
+
+        tarcc_label = ", ".join(b["cc"] for b in cc_blocks)
+        yield event.plain_result(f"您的定数 {tarcc_label} 查歌结果如下：")
 
         for i, page in enumerate(pages):
             page_num = i + 1
@@ -976,6 +981,8 @@ class Lauretta(Star):
             pages = [cc_blocks]
 
         print("Finished completion data processing")
+
+        yield event.plain_result(f"您的 {query_label}{rank_label} 完成表结果如下：")
 
         for i, page in enumerate(pages):
             page_num = i + 1
