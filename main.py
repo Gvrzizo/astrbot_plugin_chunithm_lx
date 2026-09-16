@@ -392,9 +392,15 @@ class Lauretta(Star):
 
     MAX_SONGS_PER_PAGE = 100
 
-    # 单张图片的目标上限（MB）。服务器上行带宽有限，过大的图片会导致 QQ 接口
-    # 上传失败（日志里表现为 API 返回 null），因此保存时统一压缩到此大小以内。
-    MAX_IMAGE_SIZE_MB = 4.0
+    # 单张图片的目标上限（MB）。服务器上行带宽有限（单连接实测仅约 83KB/s），
+    # 过大的图片会导致 QQ 接口上传超时/失败（日志里表现为 API 返回 null），
+    # 因此保存时统一压缩到此大小以内。
+    MAX_IMAGE_SIZE_MB = 0.6
+
+    # 压缩前的尺寸上限（像素）。渲染视口固定 1600px 宽，长图可能非常高，
+    # 先预缩放再走质量/缩放循环，避免为了达标反复压缩。
+    MAX_IMAGE_WIDTH = 1200
+    MAX_IMAGE_HEIGHT = 4000
 
     def _split_cc_blocks(self, cc_blocks: list):
         pages = []
@@ -626,13 +632,25 @@ class Lauretta(Star):
     def _save_jpeg_within_limit(self, img: Image.Image, final_path: Path, max_mb: float | None = None) -> Path:
         """将 PIL 图片保存为 JPEG，并逐级压缩到目标大小以内。
 
-        服务器上行带宽有限，过大的图片会导致 QQ 接口上传失败（日志里表现为
-        API 返回 null）。这里优先降低 JPEG 质量，仍超标时再逐步缩小分辨率，
-        尽量把最终文件压到 ``max_mb`` 之内。
+        服务器上行带宽有限，过大的图片会导致 QQ 接口上传超时/失败（日志里表现
+        为 API 返回 null）。这里先按 ``MAX_IMAGE_WIDTH``/``MAX_IMAGE_HEIGHT``
+        预缩放，再优先降低 JPEG 质量，仍超标时继续缩小分辨率，尽量把最终文件
+        压到 ``max_mb`` 之内。
         """
         max_mb = self.MAX_IMAGE_SIZE_MB if max_mb is None else max_mb
         if img.mode in ("RGBA", "LA", "P"):
             img = img.convert("RGB")
+
+        # 先按尺寸上限预缩放，超高/超宽的图不必靠反复压缩才达标
+        if img.width > self.MAX_IMAGE_WIDTH or img.height > self.MAX_IMAGE_HEIGHT:
+            ratio = min(
+                self.MAX_IMAGE_WIDTH / img.width,
+                self.MAX_IMAGE_HEIGHT / img.height,
+            )
+            img = img.resize(
+                (max(1, int(img.width * ratio)), max(1, int(img.height * ratio))),
+                Image.Resampling.LANCZOS,
+            )
 
         quality = 85
         scale = 1.0
@@ -677,7 +695,7 @@ class Lauretta(Star):
             records = top30,
             aj30_avg = aj30_avg,
         )
-        hti = Html2Image(output_path = out_path, size = (1800, 1075), custom_flags=['--force-device-scale-factor=2', '--no-sandbox'])
+        hti = Html2Image(output_path = out_path, size = (1800, 1075), custom_flags=['--force-device-scale-factor=1', '--no-sandbox'])
         tmp_file = f"{sender_id}_AJ30_tmp.png"
         hti.screenshot(
             html_str=html,
@@ -811,7 +829,7 @@ class Lauretta(Star):
             rows += (songnum + songs_per_row - 1) // songs_per_row
         height = 350 + rows * 185 + len(cc_blocks) * 30
 
-        chrome_flags = ['--force-device-scale-factor=2', '--no-sandbox']
+        chrome_flags = ['--force-device-scale-factor=1', '--no-sandbox']
         if songs_total > 80:
             chrome_flags.append('--disable-gpu')
 
@@ -918,7 +936,7 @@ class Lauretta(Star):
             rows += (songnum + songs_per_row - 1) // songs_per_row
         height = 350 + rows * 185 + len(cc_blocks) * 30
 
-        chrome_flags = ['--force-device-scale-factor=2', '--no-sandbox']
+        chrome_flags = ['--force-device-scale-factor=1', '--no-sandbox']
         if songs_total > 80:
             chrome_flags.append('--disable-gpu')
 
