@@ -6,6 +6,7 @@ from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 import requests
 import json
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 from html2image import Html2Image
@@ -15,7 +16,29 @@ from .TokenManager import TokenManager, RefreshTokenExpiredError
 import urllib3.util.connection
 urllib3.util.connection.HAS_IPV6 = False
 
-@register("chunithm_lx", "Lauretta", "中二节奏机器人", "0.2.2")
+
+def admin_command(name: str, **kwargs):
+    """管理员专属指令装饰器。
+
+    在普通指令的基础上叠加管理员权限过滤，只有 AstrBot 配置中 ``admins_id``
+    列出的用户才能触发。以后新增管理员指令时照此写法即可::
+
+        @admin_command("yourcommand")
+        async def yourcommand(self, event: AstrMessageEvent):
+            ...
+
+    其余参数（例如 ``alias``）会原样透传给 ``filter.command``。
+    """
+
+    def decorator(func):
+        return filter.permission_type(filter.PermissionType.ADMIN)(
+            filter.command(name, **kwargs)(func)
+        )
+
+    return decorator
+
+
+@register("chunithm_lx", "Lauretta", "中二节奏机器人", "0.3.0")
 class Lauretta(Star):
     TOKEN_REFRESH_INTERVAL = 7 * 24 * 3600
 
@@ -293,6 +316,20 @@ class Lauretta(Star):
             ])
         return pages
 
+    def _reset_song_state(self):
+        """清空歌曲相关的内存索引，便于重新加载缓存或刷新歌曲列表"""
+        self.songList = []
+        self.songMap = {}
+        self.versions = []
+        self.genres = []
+        for key in self.ccMap:
+            self.ccMap[key] = []
+        self.version_by_title = {}
+        self.version_by_value = {}
+        self.genre_by_name = {}
+        self.songs_by_version = {}
+        self.songs_by_genre = {}
+
     def _loadSongCache(self):
         """从本地文件加载歌曲列表"""
         if not self.songCacheFile.exists():
@@ -300,32 +337,31 @@ class Lauretta(Star):
         try:
             with open(self.songCacheFile, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            if isinstance(data, list):
-                self.songList = data
-                self.versions = []
-                self.genres = []
-            else:
-                self.songList = data.get("songs", [])
-                self.versions = data.get("versions", [])
-                self.genres = data.get("genres", [])
-            for i in self.songList:
-                isongid = i.get("id", 0)
-                self.songMap[isongid] = i
-                differ = i.get("difficulties", [])
-                if not differ:
-                    continue
-                for k in differ:
-                    oricc = k.get("level_value", 0)
-                    diffi = k.get("difficulty", 0)
-                    cc = str(round(float(oricc), 1))
-                    self.ccMap[cc].append([isongid, diffi])
-            for i in self.ccMap.values():
-                i.sort(key = lambda x: x[1])
-            logger.info(f"已从缓存加载 {len(self.songList)} 首歌曲, {len(self.versions)} 个版本, {len(self.genres)} 个分类")
         except Exception as e:
             logger.error(f"加载歌曲缓存失败: {e}")
-            self.songList = []
-            self.songMap = {}
+            return
+
+        self._reset_song_state()
+        if isinstance(data, list):
+            self.songList = data
+        else:
+            self.songList = data.get("songs", [])
+            self.versions = data.get("versions", [])
+            self.genres = data.get("genres", [])
+        for i in self.songList:
+            isongid = i.get("id", 0)
+            self.songMap[isongid] = i
+            differ = i.get("difficulties", [])
+            if not differ:
+                continue
+            for k in differ:
+                oricc = k.get("level_value", 0)
+                diffi = k.get("difficulty", 0)
+                cc = str(round(float(oricc), 1))
+                self.ccMap[cc].append([isongid, diffi])
+        for i in self.ccMap.values():
+            i.sort(key = lambda x: x[1])
+        logger.info(f"已从缓存加载 {len(self.songList)} 首歌曲, {len(self.versions)} 个版本, {len(self.genres)} 个分类")
 
     def _saveSongCache(self, songs):
         """保存歌曲列表到本地"""
@@ -342,33 +378,38 @@ class Lauretta(Star):
             logger.error(f"保存歌曲缓存失败: {e}")
 
     async def loadSongFromApi(self):
-        """从 API 获取歌曲列表"""
+        """从 API 获取歌曲列表，成功返回 True，失败返回 False"""
         try:
             response = await asyncio.to_thread(requests.get, self.songListUrl, params={"notes": "true"}, timeout=30)
             response.raise_for_status()
             data = response.json()
-            self.versions = data.get("versions", [])
-            self.genres = data.get("genres", [])
-            songs = data.get("songs", [])
-            self.songList = songs
-            for i in self.songList:
-                isongid = i.get("id", 0)
-                self.songMap[isongid] = i
-                differ = i.get("difficulties", [])
-                if not differ:
-                    continue
-                for k in differ:
-                    oricc = k.get("level_value", 0)
-                    diffi = k.get("difficulty", 0)
-                    cc = str(round(float(oricc), 1))
-                    self.ccMap[cc].append([isongid, diffi])
-            self._saveSongCache(songs)
-            self._build_meta_maps()
-            for i in self.ccMap.values():
-                i.sort(key = lambda x: x[1])
-            logger.info(f"从网络获取歌曲列表成功，共 {len(songs)} 首, {len(self.versions)} 个版本, {len(self.genres)} 个分类")
         except Exception as e:
             logger.error(f"网络请求出错: {e}")
+            return False
+
+        # 拉取成功后再重置内存状态，避免请求失败时把现有缓存清空
+        self._reset_song_state()
+        self.versions = data.get("versions", [])
+        self.genres = data.get("genres", [])
+        songs = data.get("songs", [])
+        self.songList = songs
+        for i in self.songList:
+            isongid = i.get("id", 0)
+            self.songMap[isongid] = i
+            differ = i.get("difficulties", [])
+            if not differ:
+                continue
+            for k in differ:
+                oricc = k.get("level_value", 0)
+                diffi = k.get("difficulty", 0)
+                cc = str(round(float(oricc), 1))
+                self.ccMap[cc].append([isongid, diffi])
+        self._saveSongCache(songs)
+        self._build_meta_maps()
+        for i in self.ccMap.values():
+            i.sort(key = lambda x: x[1])
+        logger.info(f"从网络获取歌曲列表成功，共 {len(songs)} 首, {len(self.versions)} 个版本, {len(self.genres)} 个分类")
+        return True
 
     async def initialize(self):
         """插件初始化时自动调用"""
@@ -1006,6 +1047,50 @@ class Lauretta(Star):
             )
             yield event.image_result(str(final_path))
 
+    # ------------------------------------------------------------------
+    # 管理员专属指令
+    #
+    # 使用 @admin_command("指令名") 注册，只有 AstrBot 配置 admins_id 中的
+    # 用户才能触发。以后要新增类似的管理员指令，照下面 refreshsongs 的写法
+    # 加一个 async 生成器方法即可，权限过滤由装饰器统一处理。
+    # ------------------------------------------------------------------
+
+    @admin_command("refreshsongs", alias={"refreshcache"})
+    async def refreshsongs(self, event: AstrMessageEvent):
+        """（管理员）重新拉取歌曲缓存，旧缓存按时间戳备份"""
+        yield event.plain_result("收到，请稍等~ 正在刷新歌曲缓存……")
+
+        archived = None
+        if self.songCacheFile.exists():
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            archived = self.storagePath / f"songs_{timestamp}.json"
+            try:
+                self.songCacheFile.rename(archived)
+                logger.info(f"旧歌曲缓存已备份为 {archived.name}")
+            except Exception as e:
+                logger.error(f"备份旧歌曲缓存失败: {e}")
+                yield event.plain_result(f"❌ 备份旧缓存失败: {e}")
+                return
+
+        success = await self.loadSongFromApi()
+        if not success:
+            # 刷新失败时把旧缓存恢复回来，避免插件处于无缓存状态
+            if archived is not None and archived.exists() and not self.songCacheFile.exists():
+                try:
+                    archived.rename(self.songCacheFile)
+                except Exception as e:
+                    logger.error(f"恢复旧歌曲缓存失败: {e}")
+            yield event.plain_result("❌ 刷新歌曲缓存失败，请查看日志。")
+            return
+
+        msgLines = [
+            f"✅ 歌曲缓存已刷新：{len(self.songList)} 首歌曲，"
+            f"{len(self.versions)} 个版本，{len(self.genres)} 个分类。"
+        ]
+        if archived is not None:
+            msgLines.append(f"旧缓存已备份为 {archived.name}")
+        yield event.plain_result("\n".join(msgLines))
+
     @filter.command("help")
     async def help(self, event: AstrMessageEvent):
         msgLines = ["可用的指令："]
@@ -1018,6 +1103,10 @@ class Lauretta(Star):
         msgLines.append("  分类查询: /cc ORIGINAL  /cc pops  (默认仅显示MASTER及以上)")
         msgLines.append("  完整参数: /cc <query> [diff] [only=0] [minrank=NONE] [expbelow=0]")
         msgLines.append("  expbelow=0 默认隐藏版本/分类查询中的EXPERT及以下难度")
+        if event.is_admin():
+            msgLines.append("")
+            msgLines.append("管理员指令：")
+            msgLines.append("/refreshsongs -- 刷新歌曲缓存，旧缓存自动备份为 songs_时间戳.json")
 
         yield event.plain_result("\n".join(msgLines))
 
