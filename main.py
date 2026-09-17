@@ -42,7 +42,7 @@ def admin_command(name: str, **kwargs):
     return decorator
 
 
-@register("chunithm_lx", "Lauretta", "中二节奏机器人", "0.3.2")
+@register("chunithm_lx", "Lauretta", "中二节奏机器人", "0.4.0")
 class Lauretta(Star):
     TOKEN_REFRESH_INTERVAL = 7 * 24 * 3600
 
