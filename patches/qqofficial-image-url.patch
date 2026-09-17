@@ -1,0 +1,124 @@
+diff --git a/astrbot/core/platform/sources/qqofficial/qqofficial_message_event.py b/astrbot/core/platform/sources/qqofficial/qqofficial_message_event.py
+index 49f7a9e8f..f8f97a8cb 100644
+--- a/astrbot/core/platform/sources/qqofficial/qqofficial_message_event.py
++++ b/astrbot/core/platform/sources/qqofficial/qqofficial_message_event.py
+@@ -292,11 +292,16 @@ class QQOfficialMessageEvent(AstrMessageEvent):
+             video_file_source,
+             file_source,
+             file_name,
++            image_url,
+         ) = await QQOfficialMessageEvent._parse_to_qqofficial(message_to_send)
+ 
+         # C2C 流式仅用于文本分片，富媒体时降级为普通发送，避免平台侧流式校验报错。
+         if stream and (
+-            image_base64 or record_file_path or video_file_source or file_source
++            image_base64
++            or image_url
++            or record_file_path
++            or video_file_source
++            or file_source
+         ):
+             logger.debug("[QQOfficial] 检测到富媒体，降级为非流式发送。")
+             stream = None
+@@ -304,6 +309,7 @@ class QQOfficialMessageEvent(AstrMessageEvent):
+         if (
+             not plain_text
+             and not image_base64
++            and not image_url
+             and not image_path
+             and not record_file_path
+             and not video_file_source
+@@ -348,7 +354,17 @@ class QQOfficialMessageEvent(AstrMessageEvent):
+                     logger.error("[QQOfficial] GroupMessage 缺少 group_openid")
+                     return None
+ 
+-                if image_base64:
++                if image_url:
++                    media = await self.upload_group_and_c2c_media(
++                        image_url,
++                        self.IMAGE_FILE_TYPE,
++                        group_openid=source.group_openid,
++                    )
++                    payload["media"] = media
++                    payload["msg_type"] = 7
++                    payload.pop("markdown", None)
++                    payload["content"] = plain_text or None
++                elif image_base64:
+                     media = await self.upload_group_and_c2c_image(
+                         image_base64,
+                         self.IMAGE_FILE_TYPE,
+@@ -403,7 +419,17 @@ class QQOfficialMessageEvent(AstrMessageEvent):
+                 )
+ 
+             case botpy.message.C2CMessage():
+-                if image_base64:
++                if image_url:
++                    media = await self.upload_group_and_c2c_media(
++                        image_url,
++                        self.IMAGE_FILE_TYPE,
++                        openid=source.author.user_openid,
++                    )
++                    payload["media"] = media
++                    payload["msg_type"] = 7
++                    payload.pop("markdown", None)
++                    payload["content"] = plain_text or None
++                elif image_base64:
+                     media = await self.upload_group_and_c2c_image(
+                         image_base64,
+                         self.IMAGE_FILE_TYPE,
+@@ -796,6 +822,7 @@ class QQOfficialMessageEvent(AstrMessageEvent):
+     async def _parse_to_qqofficial(message: MessageChain):
+         plain_text = ""
+         image_base64 = None  # only one img supported
++        image_url = None
+         image_file_path = None
+         record_file_path = None
+         video_file_source = None
+@@ -804,22 +831,28 @@ class QQOfficialMessageEvent(AstrMessageEvent):
+         for i in message.chain:
+             if isinstance(i, Plain):
+                 plain_text += i.text
+-            elif isinstance(i, Image) and not image_base64:
++            elif isinstance(i, Image) and not image_base64 and not image_url:
+                 if not i.file:
+                     raise ValueError("Unsupported image file format")
+-                image_is_local = is_file_uri(i.file)
+-                if not image_is_local:
+-                    try:
+-                        image_is_local = os.path.exists(i.file)
+-                    except OSError:
+-                        image_is_local = False
+-                resolver = MediaResolver(i.file, media_type="image")
+-                if image_is_local:
+-                    async with resolver.as_path() as resolved:
+-                        image_file_path = str(resolved.path.resolve())
+-                        image_base64 = resolved.to_base64()
++                if isinstance(i.file, str) and (
++                    i.file.startswith("http://") or i.file.startswith("https://")
++                ):
++                    # 网络图片直接交给平台按 URL 拉取，避免本机下载后再 base64 上传
++                    image_url = i.file
+                 else:
+-                    image_base64 = await resolver.to_base64()
++                    image_is_local = is_file_uri(i.file)
++                    if not image_is_local:
++                        try:
++                            image_is_local = os.path.exists(i.file)
++                        except OSError:
++                            image_is_local = False
++                    resolver = MediaResolver(i.file, media_type="image")
++                    if image_is_local:
++                        async with resolver.as_path() as resolved:
++                            image_file_path = str(resolved.path.resolve())
++                            image_base64 = resolved.to_base64()
++                    else:
++                        image_base64 = await resolver.to_base64()
+             elif isinstance(i, Record):
+                 record_ref = i.url or i.file
+                 if record_ref:
+@@ -858,4 +891,5 @@ class QQOfficialMessageEvent(AstrMessageEvent):
+             video_file_source,
+             file_source,
+             file_name,
++            image_url,
+         )

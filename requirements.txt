@@ -1,2 +1,3 @@
 html2image
 pillow
+cos-python-sdk-v5

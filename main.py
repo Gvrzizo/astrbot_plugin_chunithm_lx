@@ -8,6 +8,8 @@ import requests
 import json
 import asyncio
 import re
+import time
+import logging
 from datetime import datetime
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
@@ -72,6 +74,26 @@ class Lauretta(Star):
         self.oauthidFile = self.oauthPath / "clientid"
         self.oauthsecretFile = self.oauthPath / "clientsecret"
         self.songCacheFile = self.storagePath / "songs.json"
+
+        # 可选的 COS 上传配置（storagePath/cos.json）。配置存在时图片经腾讯内网
+        # 上传到 COS，QQ 按预签名 URL 取图，从而绕开本机上行带宽限制，此时保留
+        # 高分辨率；没有配置时回退到"小图直传"。
+        self.cosConfig = self._load_cos_config()
+        if self.cosConfig:
+            # COS SDK 的 DEBUG 日志会打印请求签名/密钥信息，这里压到 WARNING
+            logging.getLogger("qcloud_cos").setLevel(logging.WARNING)
+            self.deviceScaleFactor = self.COS_DEVICE_SCALE_FACTOR
+            self.imageMaxMb = self.COS_IMAGE_SIZE_MB
+            self.imageMaxWidth = self.COS_IMAGE_WIDTH
+            self.imageMaxHeight = self.COS_IMAGE_HEIGHT
+            logger.info(
+                f"COS 上传已启用: bucket={self.cosConfig['bucket']} region={self.cosConfig['region']}"
+            )
+        else:
+            self.deviceScaleFactor = self.DEVICE_SCALE_FACTOR
+            self.imageMaxMb = self.MAX_IMAGE_SIZE_MB
+            self.imageMaxWidth = self.MAX_IMAGE_WIDTH
+            self.imageMaxHeight = self.MAX_IMAGE_HEIGHT
 
         self.clientid = self.oauthidFile.read_text(encoding = "utf-8").strip()
         self.clientsecret = self.oauthsecretFile.read_text(encoding = "utf-8").strip()
@@ -392,15 +414,18 @@ class Lauretta(Star):
 
     MAX_SONGS_PER_PAGE = 100
 
-    # 单张图片的目标上限（MB）。服务器上行带宽有限（单连接实测仅约 83KB/s），
-    # 过大的图片会导致 QQ 接口上传超时/失败（日志里表现为 API 返回 null），
-    # 因此保存时统一压缩到此大小以内。
+    # 无 COS 时，图片要经本机上行发给 QQ（单连接实测约 83KB/s），必须压得很小。
     MAX_IMAGE_SIZE_MB = 0.6
-
-    # 压缩前的尺寸上限（像素）。渲染视口固定 1600px 宽，长图可能非常高，
-    # 先预缩放再走质量/缩放循环，避免为了达标反复压缩。
     MAX_IMAGE_WIDTH = 1200
     MAX_IMAGE_HEIGHT = 4000
+    DEVICE_SCALE_FACTOR = 1
+
+    # 启用 COS 后，图片经腾讯内网上传、由 QQ 按预签名 URL 取图，不再占用本机
+    # 上行，因此保留高分辨率（2x）和更大的体积/尺寸上限。
+    COS_IMAGE_SIZE_MB = 4.0
+    COS_IMAGE_WIDTH = 3200
+    COS_IMAGE_HEIGHT = 12000
+    COS_DEVICE_SCALE_FACTOR = 2
 
     def _split_cc_blocks(self, cc_blocks: list):
         pages = []
@@ -637,15 +662,15 @@ class Lauretta(Star):
         预缩放，再优先降低 JPEG 质量，仍超标时继续缩小分辨率，尽量把最终文件
         压到 ``max_mb`` 之内。
         """
-        max_mb = self.MAX_IMAGE_SIZE_MB if max_mb is None else max_mb
+        max_mb = self.imageMaxMb if max_mb is None else max_mb
         if img.mode in ("RGBA", "LA", "P"):
             img = img.convert("RGB")
 
         # 先按尺寸上限预缩放，超高/超宽的图不必靠反复压缩才达标
-        if img.width > self.MAX_IMAGE_WIDTH or img.height > self.MAX_IMAGE_HEIGHT:
+        if img.width > self.imageMaxWidth or img.height > self.imageMaxHeight:
             ratio = min(
-                self.MAX_IMAGE_WIDTH / img.width,
-                self.MAX_IMAGE_HEIGHT / img.height,
+                self.imageMaxWidth / img.width,
+                self.imageMaxHeight / img.height,
             )
             img = img.resize(
                 (max(1, int(img.width * ratio)), max(1, int(img.height * ratio))),
@@ -684,6 +709,76 @@ class Lauretta(Star):
                 )
                 return final_path
 
+    def _load_cos_config(self):
+        """读取可选的对象存储配置（storagePath/cos.json）。
+
+        文件不存在或字段不全时返回 None，插件自动回退到本地图片直传。
+        """
+        config_path = self.storagePath / "cos.json"
+        if not config_path.exists():
+            return None
+        try:
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.error(f"读取 cos.json 失败: {e}")
+            return None
+        required = ("region", "bucket", "secret_id", "secret_key")
+        missing = [key for key in required if not config.get(key)]
+        if missing:
+            logger.error(f"cos.json 缺少必要字段: {', '.join(missing)}")
+            return None
+        return config
+
+    def _upload_image_to_cos(self, image_path: Path):
+        """上传图片到 COS 并返回预签名 URL；失败返回 None（调用方回退本地发送）。"""
+        if not self.cosConfig:
+            return None
+        try:
+            from qcloud_cos import CosConfig, CosS3Client
+        except ImportError:
+            logger.error("未安装 cos-python-sdk-v5，无法上传 COS")
+            return None
+
+        try:
+            client = CosS3Client(
+                CosConfig(
+                    Region=self.cosConfig["region"],
+                    SecretId=self.cosConfig["secret_id"],
+                    SecretKey=self.cosConfig["secret_key"],
+                )
+            )
+            prefix = str(self.cosConfig.get("prefix", "chunithm")).strip("/")
+            # 对象名带时间戳，避免 QQ/COS 把同名 URL 当成缓存
+            object_key = f"{image_path.stem}_{int(time.time() * 1000)}{image_path.suffix}"
+            if prefix:
+                object_key = f"{prefix}/{object_key}"
+            with open(image_path, "rb") as image_file:
+                client.put_object(
+                    Bucket=self.cosConfig["bucket"],
+                    Body=image_file,
+                    Key=object_key,
+                    ContentType="image/jpeg",
+                )
+            url = client.get_presigned_url(
+                Bucket=self.cosConfig["bucket"],
+                Key=object_key,
+                Method="GET",
+                Expired=int(self.cosConfig.get("url_expire_seconds", 86400)),
+            )
+            logger.info(f"图片已上传到 COS: {object_key}")
+            return url
+        except Exception as e:
+            logger.error(f"上传图片到 COS 失败: {e}")
+            return None
+
+    async def _image_ref(self, image_path):
+        """返回可发送的图片引用：COS 可用时返回预签名 URL，否则返回本地路径。"""
+        if self.cosConfig:
+            url = await asyncio.to_thread(self._upload_image_to_cos, Path(image_path))
+            if url:
+                return url
+        return str(image_path)
+
     def render_aj30_image(self, player_name: str, player_rating: float, top30: list, aj30_avg: float, out_path: str, sender_id: str):
         base_dir = self.storagePath
         env = Environment(loader=FileSystemLoader(base_dir), autoescape=True)
@@ -695,7 +790,7 @@ class Lauretta(Star):
             records = top30,
             aj30_avg = aj30_avg,
         )
-        hti = Html2Image(output_path = out_path, size = (1800, 1075), custom_flags=['--force-device-scale-factor=1', '--no-sandbox'])
+        hti = Html2Image(output_path = out_path, size = (1800, 1075), custom_flags=[f'--force-device-scale-factor={self.deviceScaleFactor}', '--no-sandbox'])
         tmp_file = f"{sender_id}_AJ30_tmp.png"
         hti.screenshot(
             html_str=html,
@@ -805,7 +900,7 @@ class Lauretta(Star):
         )
 
         yield event.plain_result("您的 AJ30 结果如下：")
-        yield event.image_result(str(final_path))
+        yield event.image_result(await self._image_ref(final_path))
 
     def render_cc_query_image(self, query_title: str, cc_blocks: list, out_path: str, sender_id: str, page_num: int = 1, total_pages: int = 1):
         """渲染定数查歌结果图片（优化版）"""
@@ -829,7 +924,7 @@ class Lauretta(Star):
             rows += (songnum + songs_per_row - 1) // songs_per_row
         height = 350 + rows * 185 + len(cc_blocks) * 30
 
-        chrome_flags = ['--force-device-scale-factor=1', '--no-sandbox']
+        chrome_flags = [f'--force-device-scale-factor={self.deviceScaleFactor}', '--no-sandbox']
         if songs_total > 80:
             chrome_flags.append('--disable-gpu')
 
@@ -910,7 +1005,7 @@ class Lauretta(Star):
                 query_title, page, str(self.ccPath),
                 event.get_sender_id(), page_num, total_pages
             )
-            yield event.image_result(str(final_path))
+            yield event.image_result(await self._image_ref(final_path))
 
 
     def render_completion_image(self, query_title: str, satis_cnt: int, is_conditional: bool, cc_blocks: list, out_path: str, sender_id: str, page_num: int = 1, total_pages: int = 1):
@@ -936,7 +1031,7 @@ class Lauretta(Star):
             rows += (songnum + songs_per_row - 1) // songs_per_row
         height = 350 + rows * 185 + len(cc_blocks) * 30
 
-        chrome_flags = ['--force-device-scale-factor=1', '--no-sandbox']
+        chrome_flags = [f'--force-device-scale-factor={self.deviceScaleFactor}', '--no-sandbox']
         if songs_total > 80:
             chrome_flags.append('--disable-gpu')
 
@@ -1163,7 +1258,7 @@ class Lauretta(Star):
                 page_num,
                 total_pages,
             )
-            yield event.image_result(str(final_path))
+            yield event.image_result(await self._image_ref(final_path))
 
     # ------------------------------------------------------------------
     # 管理员专属指令
