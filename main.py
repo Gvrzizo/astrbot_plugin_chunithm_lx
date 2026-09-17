@@ -654,7 +654,7 @@ class Lauretta(Star):
             else:
                 rec["jacket_url"] = ""
 
-    def _save_jpeg_within_limit(self, img: Image.Image, final_path: Path, max_mb: float | None = None) -> Path:
+    def _save_jpeg_within_limit(self, img: Image.Image, final_path: Path, max_mb: float | None = None, max_width: int | None = None, max_height: int | None = None) -> Path:
         """将 PIL 图片保存为 JPEG，并逐级压缩到目标大小以内。
 
         服务器上行带宽有限，过大的图片会导致 QQ 接口上传超时/失败（日志里表现
@@ -663,14 +663,16 @@ class Lauretta(Star):
         压到 ``max_mb`` 之内。
         """
         max_mb = self.imageMaxMb if max_mb is None else max_mb
+        max_width = self.imageMaxWidth if max_width is None else max_width
+        max_height = self.imageMaxHeight if max_height is None else max_height
         if img.mode in ("RGBA", "LA", "P"):
             img = img.convert("RGB")
 
         # 先按尺寸上限预缩放，超高/超宽的图不必靠反复压缩才达标
-        if img.width > self.imageMaxWidth or img.height > self.imageMaxHeight:
+        if img.width > max_width or img.height > max_height:
             ratio = min(
-                self.imageMaxWidth / img.width,
-                self.imageMaxHeight / img.height,
+                max_width / img.width,
+                max_height / img.height,
             )
             img = img.resize(
                 (max(1, int(img.width * ratio)), max(1, int(img.height * ratio))),
@@ -771,12 +773,32 @@ class Lauretta(Star):
             logger.error(f"上传图片到 COS 失败: {e}")
             return None
 
+    def _shrink_for_fallback(self, image_path):
+        """COS 上传失败时，压一张"本地直传也发得出去"的小图作为兜底。"""
+        try:
+            small_path = image_path.with_name(f"{image_path.stem}_small{image_path.suffix}")
+            self._save_jpeg_within_limit(
+                Image.open(image_path),
+                small_path,
+                max_mb=self.MAX_IMAGE_SIZE_MB,
+                max_width=self.MAX_IMAGE_WIDTH,
+                max_height=self.MAX_IMAGE_HEIGHT,
+            )
+            return small_path
+        except Exception as e:
+            logger.error(f"生成回退小图失败: {e}")
+            return None
+
     async def _image_ref(self, image_path):
         """返回可发送的图片引用：COS 可用时返回预签名 URL，否则返回本地路径。"""
         if self.cosConfig:
             url = await asyncio.to_thread(self._upload_image_to_cos, Path(image_path))
             if url:
                 return url
+            logger.warning("COS 上传不可用，回退为压缩后的本地图片")
+            fallback = await asyncio.to_thread(self._shrink_for_fallback, Path(image_path))
+            if fallback:
+                return str(fallback)
         return str(image_path)
 
     def render_aj30_image(self, player_name: str, player_rating: float, top30: list, aj30_avg: float, out_path: str, sender_id: str):
